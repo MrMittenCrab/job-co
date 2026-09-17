@@ -1,0 +1,2 @@
+[console_scripts]
+job = career_job_manager.cli:main
