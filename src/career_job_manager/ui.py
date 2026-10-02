@@ -1,28 +1,40 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
+from rich.text import Text
+from rich.style import Style
+from textual.binding import Binding
+from textual.geometry import Region
 from textual.app import App, ComposeResult
-from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, DataTable, Input, Label, Select, Static, TextArea
+from textual.widgets import Input, Static
 
-from .filepicker import choose_file
-from .model import (
-    ApplicationRecord,
-    DEFAULT_ACTIONS,
-    STATUSES,
-    display_deadline,
-    filter_records,
+from .editing import InlineBuffer, normalize_pasted_text
+from .filepicker import choose_file, reveal_file
+from .model import ApplicationRecord, action_uses_target, filter_records
+from .presentation import (
+    ACTION_COLORS,
+    DESCRIPTION_TEXT_FIELD,
+    FILE_FIELDS,
+    FORM_FIELDS,
+    TEXT_FIELDS,
+    VALUE_COLUMN,
+    display_field_value,
+    application_heading,
+    render_home_lines,
+    render_inline_selector_lines,
+    selector_options,
+    visible_form_fields,
 )
 from .store import CareerStore
 
 
 class SearchInput(Input):
-    """Input that lets arrows continue to move the application table."""
+    """Borderless search input that leaves list movement on the arrow keys."""
 
-    def on_key(self, event) -> None:  # Textual Key event; kept untyped for version tolerance.
+    def on_key(self, event) -> None:  # kept untyped for Textual version tolerance
         screen = self.screen
         if event.key == "up" and hasattr(screen, "move_search_cursor"):
             screen.move_search_cursor(-1)
@@ -38,11 +50,331 @@ class SearchInput(Input):
             event.stop()
 
 
+class ApplicationList(Static):
+    can_focus = True
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.records: list[ApplicationRecord] = []
+        self.selected_index = 0
+        self.first_visible = 0
+
+    def set_records(self, records: list[ApplicationRecord]) -> None:
+        self.records = records
+        if not records:
+            self.selected_index = 0
+        else:
+            self.selected_index = min(self.selected_index, len(records) - 1)
+        self.refresh()
+
+    def move(self, delta: int) -> None:
+        if not self.records:
+            return
+        self.selected_index = max(0, min(len(self.records) - 1, self.selected_index + delta))
+        self.refresh()
+
+    def selected(self) -> ApplicationRecord | None:
+        if not self.records:
+            return None
+        return self.records[self.selected_index]
+
+    def render(self) -> Text:
+        capacity = max(1, self.content_size.height - 1)
+        self.first_visible = max(0, min(
+            self.first_visible, self.selected_index, len(self.records) - capacity,
+        ))
+        if self.selected_index >= self.first_visible + capacity:
+            self.first_visible = self.selected_index - capacity + 1
+        visible_records = self.records[self.first_visible:self.first_visible + capacity]
+        lines = render_home_lines(
+            visible_records,
+            self.selected_index - self.first_visible,
+        )
+        if not self.records:
+            lines.append("\n  No applications")
+        rendered = Text(lines[0], no_wrap=True, overflow="crop")
+        for record, line in zip(visible_records, lines[1:]):
+            rendered.append("\n" + line)
+            color = ACTION_COLORS.get(record.action)
+            if color:
+                rendered.stylize(color, len(rendered) - len(record.action), len(rendered))
+        if not self.records:
+            rendered.append("\n" + lines[1])
+        return rendered
+
+    def on_resize(self) -> None:
+        self.refresh()
+
+    def on_mouse_down(self, event) -> None:
+        event.prevent_default()
+        event.stop()
+
+
+class FieldRow(Static):
+    can_focus = True
+
+    def __init__(self, field: str, value: str = "") -> None:
+        super().__init__(id=f"field-{field.lower()}", markup=False)
+        self.field = field
+        self.value = value
+        self.selector_options: tuple[str, ...] = ()
+        self.selector_index = 0
+        self.document_option: int | None = None
+        self.editor: InlineBuffer | None = None
+        self._follow_cursor = False
+
+    @property
+    def editing(self) -> bool:
+        return self.editor is not None
+
+    def set_value(self, value: str) -> None:
+        self.value = value
+        self.refresh(layout=True)
+
+    def begin_edit(self) -> None:
+        self.editor = InlineBuffer.from_value(self.value)
+        self.editor.move_home()
+        self._follow_cursor = True
+        self.refresh(layout=True)
+        self.call_after_refresh(self._reveal_cursor)
+
+    def commit_edit(self) -> str:
+        if self.editor is None:
+            return self.value
+        value = self.editor.value
+        self.editor = None
+        self.value = value
+        self.refresh(layout=True)
+        return value
+
+    @property
+    def selector_open(self) -> bool:
+        return bool(self.selector_options)
+
+    def open_selector(self, options: tuple[str, ...], current: str) -> None:
+        self.selector_options = options
+        self.selector_index = options.index(current) if current in options else 0
+        self.refresh(layout=True)
+
+    def move_selector(self, delta: int) -> None:
+        if not self.selector_options:
+            return
+        self.selector_index = (self.selector_index + delta) % len(self.selector_options)
+        self.refresh(layout=True)
+
+    def selected_option(self) -> str | None:
+        if not self.selector_options:
+            return None
+        return self.selector_options[self.selector_index]
+
+    def close_selector(self) -> None:
+        self.selector_options = ()
+        self.selector_index = 0
+        self.refresh(layout=True)
+
+    def _value_lines(self) -> list[Text]:
+        value = self.editor.value if self.editor is not None else self.value
+        if self.editor is not None:
+            cursor = self.editor.cursor
+            text = Text(value[:cursor] + "│" + value[cursor:])
+            text.stylize("reverse", cursor, cursor + 1)
+            if self.editor.all_selected:
+                text.stylize("reverse", 0, len(text))
+        else:
+            value = " ".join(value.splitlines()).replace("\t", " ")
+            text = Text(display_field_value(self.field, value),
+                        style=ACTION_COLORS.get(value, "") if self.field == "Action" else "")
+        width = max(1, self.size.width - VALUE_COLUMN)
+        if self.editor is None:
+            text.truncate(width, overflow="ellipsis")
+            return [text]
+        return list(text.wrap(self.app.console, width))
+
+    def render(self) -> Text:
+        if self.selector_open:
+            lines = render_inline_selector_lines(
+                self.field, self.value, self.selector_options, self.selector_index
+            )
+            rendered = Text(no_wrap=True, overflow="crop")
+            for index, (line, option) in enumerate(zip(lines, self.selector_options)):
+                if index:
+                    rendered.append("\n")
+                start = len(rendered)
+                rendered.append(line)
+                if self.field == "Action":
+                    rendered.stylize(ACTION_COLORS[option], len(rendered) - len(option), len(rendered))
+                    if index == 0:
+                        rendered.stylize(ACTION_COLORS.get(self.value, "white"),
+                                         start + VALUE_COLUMN, start + VALUE_COLUMN + len(self.value))
+            return rendered
+        label = {DESCRIPTION_TEXT_FIELD: "Description", "Job": "Program"}.get(self.field, self.field)
+        if self.field in FILE_FIELDS:
+            rendered = Text(f"{'>' if self.has_focus else ' '} {label:<{VALUE_COLUMN - 3}} ",
+                            no_wrap=True, overflow="crop")
+            for index, option in enumerate(("View", "Choose")):
+                if index:
+                    rendered.append("    ")
+                rendered.append(option, style="underline" if self.has_focus and self.document_option == index else "")
+            return rendered
+        prefix = f"{'>' if self.has_focus else ' '} {label:<{VALUE_COLUMN - 3}} "
+        rendered = Text(no_wrap=True, overflow="crop")
+        for index, line in enumerate(self._value_lines()):
+            if index:
+                rendered.append("\n")
+            rendered.append(prefix if index == 0 else " " * VALUE_COLUMN)
+            rendered.append(line)
+        return rendered
+
+    def on_resize(self) -> None:
+        self.refresh(layout=True)
+        # Navigation reveals the field; editing follows the insertion cursor.
+        self.call_after_refresh(
+            self._reveal_cursor if self._follow_cursor else self._reveal_field
+        )
+
+    def _reveal_field(self) -> None:
+        parent = self.parent
+        if not self.has_focus or not isinstance(parent, VerticalScroll):
+            return
+        region = self.virtual_region
+        if region.height > parent.scrollable_content_region.height:
+            region = Region(region.x, region.y, region.width, 1)
+        parent.scroll_to_region(region, animate=False, immediate=True)
+
+    def _reveal_cursor(self) -> None:
+        if self.editor is None or not self.has_focus or not self.size.width:
+            return
+        cursor = self.editor.cursor
+        text = Text(self.editor.value[:cursor] + "│" + self.editor.value[cursor:])
+        text.stylize("reverse", cursor, cursor + 1)
+        cursor_line = next(index for index, line in enumerate(
+            text.wrap(self.app.console, max(1, self.size.width - VALUE_COLUMN))
+        ) if line.spans)
+        parent = self.parent
+        if isinstance(parent, VerticalScroll):
+            region = Region(0, self.virtual_region.y + cursor_line, 1, 1)
+            if self.field == DESCRIPTION_TEXT_FIELD and cursor_line == 0:
+                # At the top of Description, show the preceding entry fields
+                # alongside the cursor within the same viewport.
+                top = max(0, region.y - parent.scrollable_content_region.height + 1)
+                region = Region(0, top, 1, region.y - top + 1)
+            parent.scroll_to_region(
+                region,
+                animate=False, immediate=True,
+            )
+
+    def move_text_vertical(self, delta: int) -> bool:
+        """Move within wrapped text; return False at a field boundary."""
+        if self.editor is None:
+            return False
+        cursor = self.editor.cursor
+        value = self.editor.value
+        text = Text(value[:cursor] + "│" + value[cursor:])
+        for index in range(len(text)):
+            text.stylize(Style(meta={"offset": index if index <= cursor else index - 1, "cursor": index == cursor}), index, index + 1)
+        lines = list(text.wrap(self.app.console, max(1, self.size.width - VALUE_COLUMN)))
+        current = next(i for i, line in enumerate(lines)
+                       if any(span.style.meta["cursor"] for span in line.spans))
+        target = max(0, min(len(lines) - 1, current + delta))
+        if target == current:
+            return False
+        if target != current:
+            cursor_span = next(span for span in lines[current].spans
+                               if span.style.meta["cursor"])
+            column = Text(lines[current].plain[:cursor_span.start]).cell_len
+            candidates = [(Text(lines[target].plain[:span.start]).cell_len, span.style.meta["offset"])
+                          for span in lines[target].spans if span.start < len(lines[target])]
+            if not candidates:
+                # Rich omits newline characters from blank display lines.
+                following = next((i for i in range(target + 1, len(lines)) if lines[i].spans), None)
+                offset = (lines[following].spans[0].style.meta["offset"] - (following - target)
+                          if following is not None else len(value))
+                candidates = [(0, offset)]
+            if candidates:
+                self.editor.cursor = min(candidates, key=lambda item: abs(item[0] - column))[1]
+        self.editor.all_selected = False
+        self._follow_cursor = True
+        self.refresh(layout=True)
+        self.call_after_refresh(self._reveal_cursor)
+        return True
+
+    def on_key(self, event) -> None:  # kept untyped for Textual version tolerance
+        if self.editor is None:
+            return
+        key = event.key
+        if key in {"enter", "up", "down", "tab", "shift+tab", "escape", "ctrl+s"}:
+            return
+        elif key == "shift+enter" and self.field in {"Brief", DESCRIPTION_TEXT_FIELD}:
+            self.editor.insert("\n")
+            self.refresh(layout=True)
+        elif key == "left":
+            if self.editor.cursor == 0 and not self.editor.all_selected:
+                self.screen.finish_inline_edit(self.field, self.commit_edit())
+            else:
+                self.editor.move_left()
+            self.refresh(layout=True)
+        elif key == "right":
+            self.editor.move_right()
+            self.refresh(layout=True)
+        elif key == "ctrl+a":
+            self.editor.select_all()
+            self.refresh(layout=True)
+        elif key == "home":
+            self.editor.move_home()
+            self.refresh(layout=True)
+        elif key == "end":
+            self.editor.move_end()
+            self.refresh(layout=True)
+        elif key == "backspace":
+            self.editor.backspace()
+            self.refresh(layout=True)
+        elif key == "delete":
+            self.editor.delete()
+            self.refresh(layout=True)
+        elif event.is_printable and event.character is not None:
+            self.editor.insert(event.character)
+            self.refresh(layout=True)
+        else:
+            return
+        self._follow_cursor = True
+        self.call_after_refresh(self._reveal_cursor)
+        event.prevent_default()
+        event.stop()
+
+    def on_paste(self, event) -> None:  # kept untyped for Textual version tolerance
+        if self.editor is None:
+            return
+        text = normalize_pasted_text(
+            event.text, multiline=self.field in {"Brief", DESCRIPTION_TEXT_FIELD}
+        )
+        self.editor.insert(text)
+        self.refresh(layout=True)
+        self._follow_cursor = True
+        self.call_after_refresh(self._reveal_cursor)
+        event.prevent_default()
+        event.stop()
+
+    def on_focus(self) -> None:
+        self.refresh(layout=True)
+
+    def on_blur(self) -> None:
+        self.document_option = None
+        if self.editor is not None:
+            self.screen.finish_inline_edit(self.field, self.commit_edit())
+        if self.selector_open:
+            self.close_selector()
+        self.refresh(layout=True)
+
+    def on_mouse_down(self, event) -> None:
+        event.prevent_default()
+        event.stop()
+
+
 class ConfirmDelete(ModalScreen[bool]):
     BINDINGS = [
-        ("escape", "cancel", "Cancel"),
         ("y", "confirm", "Delete"),
         ("n", "cancel", "Cancel"),
+        ("escape", "cancel", "Cancel"),
     ]
 
     def __init__(self, label: str) -> None:
@@ -50,12 +382,7 @@ class ConfirmDelete(ModalScreen[bool]):
         self.label = label
 
     def compose(self) -> ComposeResult:
-        yield Grid(
-            Label(f"Delete {self.label}?\nThis removes the job folder too.", id="delete-question"),
-            Button("Delete", id="delete-confirm", variant="error"),
-            Button("Cancel", id="delete-cancel", variant="primary"),
-            id="delete-dialog",
-        )
+        yield Static(f"Delete {self.label}?\n\ny delete     n cancel", id="delete-question")
 
     def action_confirm(self) -> None:
         self.dismiss(True)
@@ -63,62 +390,90 @@ class ConfirmDelete(ModalScreen[bool]):
     def action_cancel(self) -> None:
         self.dismiss(False)
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "delete-confirm")
-
 
 class HomeScreen(Screen):
     BINDINGS = [
+        ("up", "move_up", "Up"),
+        ("down", "move_down", "Down"),
+        ("right", "open_selected", "Open"),
         ("a", "add_application", "Add"),
+        ("c", "open_company", "Company"),
+        ("left", "back_context", "Back"),
         ("/", "start_search", "Search"),
         ("d", "delete_application", "Delete"),
-        ("q", "quit_app", "Quit"),
+        ("escape", "quit_app", "Quit"),
     ]
 
-    def __init__(self, store: CareerStore) -> None:
+    def __init__(self, store: CareerStore, company_context=None, client_context=None) -> None:
         super().__init__()
         self.store = store
+        self.company_context = company_context
+        self.client_context = client_context
         self.visible_records: list[ApplicationRecord] = []
 
     def compose(self) -> ComposeResult:
         yield Static("APPLICATIONS", id="home-title")
-        yield DataTable(id="applications", cursor_type="row", zebra_stripes=True)
-        yield SearchInput(placeholder="Search Company, Job, Status, Contact", id="search")
-        yield Static("a add     Enter edit     / search     d delete     q quit", id="home-help")
+        yield ApplicationList(id="applications")
+        yield SearchInput(placeholder="Search", id="search")
+        yield Static("a add   → open   c company   / search   d delete   Esc quit", id="home-help")
 
     def on_mount(self) -> None:
-        table = self.query_one("#applications", DataTable)
-        table.add_columns("Deadline", "Company", "Job", "Status")
         self.query_one("#search", SearchInput).styles.display = "none"
-        self.refresh_table()
-        table.focus()
+        self.refresh_list()
+        self.query_one("#applications", ApplicationList).focus()
 
-    def refresh_table(self) -> None:
+    def refresh_list(self) -> None:
         search = self.query_one("#search", SearchInput)
         self.visible_records = filter_records(self.store.list(), search.value)
-        table = self.query_one("#applications", DataTable)
-        previous_row = table.cursor_row
-        table.clear()
-        for record in self.visible_records:
-            table.add_row(
-                display_deadline(record.deadline),
-                record.company,
-                record.job,
-                record.status,
-                key=record.id,
-            )
-        if table.row_count:
-            table.move_cursor(row=min(max(previous_row, 0), table.row_count - 1))
+        if self.company_context:
+            from .company import resolve, relevance
+            companies = self.store.companies()
+            self.visible_records = [r for r in self.visible_records
+                                    if (resolve(companies, r.company_id, r.company) or {}).get('id') == self.company_context['id']]
+            self.visible_records.sort(key=lambda r: relevance(r, self.client_context or {}))
+        self.query_one("#applications", ApplicationList).set_records(self.visible_records)
 
     def selected_record(self) -> ApplicationRecord | None:
-        table = self.query_one("#applications", DataTable)
-        if not self.visible_records or not table.row_count:
-            return None
-        row = min(max(table.cursor_row, 0), len(self.visible_records) - 1)
-        return self.visible_records[row]
+        return self.query_one("#applications", ApplicationList).selected()
+
+    def action_move_up(self) -> None:
+        self.action_move(-1)
+
+    def action_move_down(self) -> None:
+        self.action_move(1)
+
+    def action_move(self, delta: int) -> None:
+        if self.query_one("#search", SearchInput).has_focus:
+            return
+        self.query_one("#applications", ApplicationList).move(delta)
+
+    def move_search_cursor(self, delta: int) -> None:
+        self.query_one("#applications", ApplicationList).move(delta)
+
+    def action_open_selected(self) -> None:
+        if self.query_one("#search", SearchInput).has_focus:
+            return
+        self.open_selected()
+
+    def open_selected(self) -> None:
+        record = self.selected_record()
+        if record is not None:
+            self.app.push_screen(ApplicationScreen(self.store, record.id), self._after_application)
+
+    def action_open_company(self) -> None:
+        record = self.selected_record()
+        if record and not self.query_one('#search', SearchInput).has_focus:
+            from .company import resolve
+            from .company_ui import CompanyScreen
+            company = resolve(self.store.companies(), record.company_id, record.company)
+            self.app.push_screen(CompanyScreen(self.store, company, 'value', record))
+
+    def action_back_context(self) -> None:
+        if self.company_context and not self.query_one('#search', SearchInput).has_focus:
+            self.app.pop_screen()
 
     def action_add_application(self) -> None:
-        self.app.push_screen(ApplicationScreen(self.store), self._after_form)
+        self.app.push_screen(ApplicationScreen(self.store), self._after_application)
 
     def action_start_search(self) -> None:
         search = self.query_one("#search", SearchInput)
@@ -129,14 +484,8 @@ class HomeScreen(Screen):
         search = self.query_one("#search", SearchInput)
         search.value = ""
         search.styles.display = "none"
-        self.refresh_table()
-        self.query_one("#applications", DataTable).focus()
-
-    def move_search_cursor(self, delta: int) -> None:
-        table = self.query_one("#applications", DataTable)
-        if not table.row_count:
-            return
-        table.move_cursor(row=max(0, min(table.row_count - 1, table.cursor_row + delta)))
+        self.refresh_list()
+        self.query_one("#applications", ApplicationList).focus()
 
     def action_delete_application(self) -> None:
         record = self.selected_record()
@@ -151,39 +500,37 @@ class HomeScreen(Screen):
             except Exception as exc:
                 self.app.notify(str(exc), severity="error")
                 return
-            self.refresh_table()
+            self.refresh_list()
 
         self.app.push_screen(ConfirmDelete(f"{record.company} — {record.job}"), after_confirm)
 
     def action_quit_app(self) -> None:
         self.app.exit()
 
-    def open_selected(self) -> None:
-        record = self.selected_record()
-        if record is not None:
-            self.app.push_screen(ApplicationScreen(self.store, record.id), self._after_form)
-
-    def _after_form(self, saved: bool | None) -> None:
+    def _after_application(self, saved: bool | None) -> None:
         if saved:
-            self.refresh_table()
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        self.open_selected()
+            self.refresh_list()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search":
-            self.refresh_table()
+            self.refresh_list()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "search":
-            self.open_selected()
+            event.stop()
+            event.input.styles.display = "none"
+            self.query_one(ApplicationList).focus()
 
 
 class ApplicationScreen(Screen[bool]):
     BINDINGS = [
-        ("s", "save", "Save"),
-        ("ctrl+s", "save", "Save"),
-        ("escape", "cancel", "Cancel"),
+        Binding("up", "move_up", "Up", priority=True),
+        Binding("down", "move_down", "Down", priority=True),
+        Binding("enter", "finish_interaction", "Select", priority=True),
+        ("right", "activate_field", "Choose"),
+        ("c", "open_company", "Company"),
+        ("left", "leave_choice", "Back"),
+        ("escape", "quit_app", "Quit"),
     ]
 
     def __init__(self, store: CareerStore, record_id: str | None = None) -> None:
@@ -191,239 +538,341 @@ class ApplicationScreen(Screen[bool]):
         self.store = store
         self.record_id = record_id
         self.record = store.get(record_id) if record_id else None
-        self.pending_resume: Path | None = None
-        self.pending_letter: Path | None = None
-        self._last_status = self.record.status if self.record else "Application"
+        self.values = self._initial_values()
 
     @property
-    def editing(self) -> bool:
+    def existing(self) -> bool:
         return self.record is not None
 
-    def compose(self) -> ComposeResult:
+    def _initial_values(self) -> dict[str, str]:
         record = self.record
-        title = "EDIT" if self.editing else "ADD"
-        company = record.company if record else ""
-        job = record.job if record else ""
-        status = record.status if record else "Application"
-        deadline = record.deadline if record else ""
-        action = record.action if record else DEFAULT_ACTIONS[status]
-        apply_value = record.apply if record else ""
-        contact = record.contact if record else ""
-        description = record.description if record else ""
-        resume = record.resume if record and record.resume else "—"
-        letter = record.letter if record and record.letter else "—"
-
-        yield Static(title, id="form-title")
-        with VerticalScroll(id="form-scroll"):
-            yield self._input_row("Company", company, "company")
-            yield self._input_row("Job", job, "job")
-            with Horizontal(classes="form-row"):
-                yield Label("Status", classes="field-label")
-                yield Select(
-                    ((item, item) for item in STATUSES),
-                    value=status,
-                    allow_blank=False,
-                    id="status",
-                )
-            yield self._input_row("Deadline", deadline, "deadline", "YYYY-MM-DD [HH:MM]")
-            yield self._input_row("Action", action, "action")
-            yield self._input_row("Apply", apply_value, "apply")
-            yield self._input_row("Contact", contact, "contact")
-            with Vertical(classes="description-row"):
-                yield Label("Description", classes="field-label")
-                yield TextArea(description, id="description", soft_wrap=True)
-            yield Static("", classes="separator")
-            with Horizontal(classes="document-row"):
-                yield Label("Resume", classes="field-label")
-                yield Label(resume, id="resume-name", classes="document-name")
-                yield Button("Choose", id="choose-resume")
-            with Horizontal(classes="document-row"):
-                yield Label("Letter", classes="field-label")
-                yield Label(letter, id="letter-name", classes="document-name")
-                yield Button("Choose", id="choose-letter")
-        yield Static("s / ctrl+s save     esc cancel", id="form-help")
-
-    def _input_row(self, label: str, value: str, widget_id: str, placeholder: str = "") -> Horizontal:
-        return Horizontal(
-            Label(label, classes="field-label"),
-            Input(value=value, placeholder=placeholder, id=widget_id),
-            classes="form-row",
-        )
-
-    def action_cancel(self) -> None:
-        self.dismiss(False)
-
-    def action_save(self) -> None:
-        status_widget = self.query_one("#status", Select)
-        status = str(status_widget.value)
-        record_data = {
-            "company": self.query_one("#company", Input).value,
-            "job": self.query_one("#job", Input).value,
-            "status": status,
-            "deadline": self.query_one("#deadline", Input).value,
-            "action": self.query_one("#action", Input).value,
-            "apply": self.query_one("#apply", Input).value,
-            "contact": self.query_one("#contact", Input).value,
-            "description": self.query_one("#description", TextArea).text,
+        return {
+            "Company": record.company if record else "",
+            "Job": record.job if record else "",
+            "Deadline": record.deadline if record else "",
+            "Action": record.action if record else "Apply",
+            "Target": record.target if record else "",
+            "Brief": record.brief if record else "",
+            "Portal": record.portal if record else "",
+            "Contact": record.contact if record else "",
+            "Resume": record.resume if record else "",
+            "Letter": record.letter if record else "",
+            "Brochure": record.brochure if record else "",
+            "DescriptionText": record.description_text if record else "",
+            "Form": record.form if record else "",
         }
+
+    def compose(self) -> ComposeResult:
+        yield Static(application_heading(self.record), id="form-title", markup=False)
+        with VerticalScroll(id="form-list"):
+            for field in FORM_FIELDS:
+                yield FieldRow(field, self.values[field])
+        yield Static("↑ ↓ / Tab navigate   → enter   ← back   c company   Enter finish   Esc quit", id="form-help")
+
+    def on_mount(self) -> None:
+        self._sync_target_visibility()
+        rows = self._navigable_rows()
+        if rows:
+            rows[0].focus()
+
+    def _visible_rows(self) -> list[FieldRow]:
+        visible = set(visible_form_fields(self.values["Action"]))
+        return [row for row in self.query(FieldRow) if row.field in visible]
+
+    def _navigable_rows(self) -> list[FieldRow]:
+        return self._visible_rows()
+
+    def _row(self, field: str) -> FieldRow:
+        return self.query_one(f"#field-{field.lower()}", FieldRow)
+
+    def _sync_target_visibility(self) -> None:
+        row = self._row("Target")
+        show = action_uses_target(self.values["Action"])
+        row.styles.display = "block" if show else "none"
+        if not show:
+            self.values["Target"] = ""
+            row.set_value("")
+
+    def action_move_up(self) -> None:
+        self.action_move(-1)
+
+    def action_move_down(self) -> None:
+        self.action_move(1)
+
+    def action_move(self, delta: int) -> None:
+        current = self.focused
+        if isinstance(current, FieldRow) and current.editing:
+            if current.move_text_vertical(delta):
+                return
+            rows = self._navigable_rows()
+            index = rows.index(current) + delta
+            if not 0 <= index < len(rows):
+                return
+            self.finish_inline_edit(current.field, current.commit_edit())
+            row = rows[index]
+            self.set_focus(row, scroll_visible=False)
+            if row.field in TEXT_FIELDS or row.field in FILE_FIELDS:
+                self.action_activate_field()
+            self.call_after_refresh(row._reveal_cursor if row.editing else row._reveal_field)
+            return
+        if isinstance(current, FieldRow) and current.selector_open:
+            current.move_selector(delta)
+            return
+        rows = self._navigable_rows()
+        if not rows:
+            return
+        index = rows.index(current) if current in rows else 0
+        row = rows[max(0, min(len(rows) - 1, index + delta))]
+        row.focus(scroll_visible=False)
+        self.call_after_refresh(row._reveal_field)
+
+    def action_open_company(self) -> None:
+        if not self.existing:
+            return
+        row = self.focused
+        if isinstance(row, FieldRow) and (row.editing or row.selector_open):
+            return
         try:
-            if self.editing:
-                self.store.update(
-                    self.record_id or "",
-                    record_data,
-                    resume_source=self.pending_resume,
-                    letter_source=self.pending_letter,
-                )
+            record = self.store.update(self.record_id, self._record_data())
+        except (ValueError, OSError) as exc:
+            self.app.notify(str(exc), severity='error')
+            return
+        from .company import resolve
+        from .company_ui import CompanyScreen
+        company = resolve(self.store.companies(), record.company_id, record.company)
+        self.app.push_screen(CompanyScreen(self.store, company, 'value', record))
+
+    def action_activate_field(self) -> None:
+        row = self.focused
+        if not isinstance(row, FieldRow) or row.editing:
+            return
+        if row.selector_open:
+            self._after_choice(row.field, row.selected_option())
+            row.close_selector()
+            return
+        field = row.field
+        if field in TEXT_FIELDS:
+            row.begin_edit()
+            return
+        if field in FILE_FIELDS:
+            row.document_option = 0 if row.document_option is None else 1
+            row.refresh()
+            return
+        options = selector_options(field)
+        if options:
+            row.open_selector(options, self.values[field])
+
+    def action_leave_choice(self) -> None:
+        row = self.focused
+        if isinstance(row, FieldRow) and row.field in FILE_FIELDS and row.document_option is not None:
+            row.document_option = 0 if row.document_option == 1 else None
+            row.refresh()
+        elif isinstance(row, FieldRow) and row.selector_open:
+            row.close_selector()
+        elif not isinstance(row, FieldRow) or not row.editing:
+            self.action_save()
+
+    def action_finish_interaction(self) -> None:
+        row = self.focused
+        if isinstance(row, FieldRow) and row.field in FILE_FIELDS and row.document_option is not None:
+            if row.document_option:
+                self._choose_document(row.field)
             else:
-                new_record = ApplicationRecord(
-                    id=uuid.uuid4().hex,
-                    resume="",
-                    letter="",
-                    **record_data,
-                )
-                self.store.add(
-                    new_record,
-                    resume_source=self.pending_resume,
-                    letter_source=self.pending_letter,
-                )
-        except Exception as exc:
-            self.app.notify(str(exc), severity="error", timeout=5)
+                self._view_document(row.field)
+        elif isinstance(row, FieldRow) and row.editing:
+            self.finish_inline_edit(row.field, row.commit_edit())
+        elif isinstance(row, FieldRow) and not row.selector_open and selector_options(row.field):
             return
-        self.dismiss(True)
+        else:
+            self.action_activate_field()
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id != "status" or event.value is Select.NULL:
-            return
-        new_status = str(event.value)
-        action = self.query_one("#action", Input)
-        old_default = DEFAULT_ACTIONS.get(self._last_status, "")
-        if not action.value.strip() or action.value.strip() == old_default:
-            action.value = DEFAULT_ACTIONS[new_status]
-        self._last_status = new_status
+    def finish_inline_edit(self, field: str, value: str) -> None:
+        self.values[field] = value
+        self._row(field).set_value(value)
+        if field in {"Company", "Job"} and self.existing:
+            company = self.values["Company"].strip() or self.record.company
+            job = self.values["Job"].strip() or self.record.job
+            self.query_one("#form-title", Static).update(f"{company} — {job}")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id not in {"choose-resume", "choose-letter"}:
+    def _after_choice(self, field: str, value: str | None) -> None:
+        if value is None:
             return
-        kind = "Resume" if event.button.id == "choose-resume" else "Letter"
+        self.values[field] = value
+        self._row(field).set_value(value)
+        if field == "Action":
+            self._sync_target_visibility()
+
+    def _view_document(self, field: str) -> None:
+        name = getattr(self.record, field.lower(), "") if self.record else ""
+        if not name:
+            self.app.notify(f"No managed {field} file exists.")
+            return
         try:
-            selected = choose_file(f"Choose {kind}")
+            reveal_file(self.store._folder(self.record) / name)
+        except Exception as exc:
+            self.app.notify(str(exc), severity="error")
+
+    def _choose_document(self, field: str) -> None:
+        try:
+            selected = choose_file(f"Choose {field}")
         except Exception as exc:
             self.app.notify(str(exc), severity="error")
             return
         if selected is None:
             return
-        if kind == "Resume":
-            self.pending_resume = selected
-            self.query_one("#resume-name", Label).update(f"Selected: {selected.name}")
-        else:
-            self.pending_letter = selected
-            self.query_one("#letter-name", Label).update(f"Selected: {selected.name}")
+        try:
+            sources = {f"{field.lower()}_source": selected}
+            if self.existing:
+                self.record = self.store.update(self.record_id, {}, **sources)
+            else:
+                self.record = self.store.add(
+                    ApplicationRecord(id=uuid.uuid4().hex, **self._record_data()), **sources)
+                self.record_id = self.record.id
+            name = getattr(self.record, field.lower())
+            self.values[field] = name
+            self._row(field).set_value(name)
+        except Exception as exc:
+            self.app.notify(str(exc), severity="error")
+
+    def _record_data(self) -> dict[str, str]:
+        action = self.values["Action"]
+        return {
+            "company": self.values["Company"],
+            "job": self.values["Job"],
+            "deadline": self.values["Deadline"],
+            "action": action,
+            "target": self.values["Target"] if action_uses_target(action) else "",
+            "brief": self.values["Brief"],
+            "portal": self.values["Portal"],
+            "contact": self.values["Contact"],
+            "description_text": self.values["DescriptionText"],
+        }
+
+    def action_quit_app(self) -> None:
+        self.app.exit()
+
+    def action_save(self) -> None:
+        row = self.focused
+        if isinstance(row, FieldRow) and row.selector_open:
+            row.close_selector()
+        if isinstance(row, FieldRow) and row.editing:
+            self.finish_inline_edit(row.field, row.commit_edit())
+        record_data = self._record_data()
+        try:
+            if self.existing:
+                self.store.update(self.record_id or "", record_data)
+            else:
+                new_record = ApplicationRecord(
+                    id=uuid.uuid4().hex,
+                    brochure="",
+                    form="",
+                    resume="",
+                    letter="",
+                    **record_data,
+                )
+                self.store.add(new_record)
+        except Exception as exc:
+            self.app.notify(str(exc), severity="error", timeout=5)
+            if isinstance(row, FieldRow) and row.field in TEXT_FIELDS:
+                row.begin_edit()
+            return
+        self.dismiss(True)
 
 
 class CareerApp(App):
     TITLE = "Career"
     CSS = """
-    Screen {
-        background: $background;
+    Screen, ModalScreen {
+        background: ansi_default;
+        color: white;
+    }
+
+    Static, Input {
+        background: ansi_default;
+        color: white;
+        text-style: none;
     }
 
     #home-title, #form-title {
-        height: 3;
-        content-align: left middle;
-        text-style: bold;
-        padding-left: 1;
+        height: 2;
+        padding: 0 1;
+        text-style: none;
     }
 
     #applications {
         height: 1fr;
-        margin: 0 1;
+        padding: 0 1;
     }
 
     #search {
         margin: 0 1;
-        height: 3;
+        height: 1;
+        border: none;
+        outline: none;
+        padding: 0;
+    }
+
+    #search:focus {
+        border: none;
+        outline: none;
+        background: ansi_default;
+        color: white;
+        text-style: none;
     }
 
     #home-help, #form-help {
-        height: 3;
-        padding: 1;
-        color: $text-muted;
+        height: 2;
+        padding: 0 1;
+        text-style: none;
     }
 
-    #form-scroll {
+    #form-list {
         height: 1fr;
-        padding: 0 2;
+        padding: 0 1;
+        scrollbar-size: 1 1;
     }
 
-    .form-row, .document-row {
-        height: 3;
-        margin-bottom: 1;
+    FieldRow {
+        height: auto;
+        min-height: 1;
+        background: ansi_default;
+        color: white;
+        text-style: none;
     }
 
-    .field-label {
-        width: 14;
-        content-align: left middle;
-    }
-
-    .form-row Input, .form-row Select {
-        width: 1fr;
-    }
-
-    .description-row {
-        height: 10;
-        margin-bottom: 1;
-    }
-
-    #description {
-        height: 7;
-        width: 100%;
-    }
-
-    .separator {
-        height: 1;
-        border-top: solid $surface;
-        margin-bottom: 1;
-    }
-
-    .document-name {
-        width: 1fr;
-        content-align: left middle;
-        color: $text-muted;
-    }
-
-    .document-row Button {
-        width: 12;
+    FieldRow:focus {
+        background: ansi_default;
+        color: white;
+        text-style: none;
+        border: none;
+        outline: none;
     }
 
     ConfirmDelete {
-        align: center middle;
-    }
-
-    #delete-dialog {
-        grid-size: 2;
-        grid-gutter: 1 2;
-        grid-rows: 1fr 3;
-        width: 64;
-        height: 10;
+        align: left top;
+        background: ansi_default;
+        color: white;
         padding: 1 2;
-        border: thick $background 80%;
-        background: $surface;
     }
 
     #delete-question {
-        column-span: 2;
-        content-align: center middle;
-        text-align: center;
-    }
-
-    #delete-dialog Button {
         width: 100%;
+        height: auto;
+        background: ansi_default;
+        color: white;
+        text-style: none;
     }
     """
 
-    def __init__(self, store: CareerStore | None = None) -> None:
-        super().__init__()
+    def __init__(self, store: CareerStore | None = None, *, initial_root: str = "job") -> None:
+        # Preserve terminal-default colors instead of converting them to RGB.
+        super().__init__(ansi_color=True)
         self.store = store or CareerStore()
+        self.initial_root = initial_root
 
     def on_mount(self) -> None:
-        self.push_screen(HomeScreen(self.store))
+        if self.initial_root == 'company':
+            from .company_ui import CompanyScreen
+            self.push_screen(CompanyScreen(self.store))
+        else:
+            self.push_screen(HomeScreen(self.store))

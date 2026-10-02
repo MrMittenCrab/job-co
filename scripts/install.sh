@@ -10,6 +10,7 @@ python3 -m venv .venv
 
 mkdir -p "$HOME/bin"
 ln -sfn "$ROOT/.venv/bin/job" "$HOME/bin/job"
+ln -sfn "$ROOT/.venv/bin/company" "$HOME/bin/company"
 mkdir -p "$HOME/Documents/Career/Applications"
 
 echo "Installed: $HOME/bin/job"

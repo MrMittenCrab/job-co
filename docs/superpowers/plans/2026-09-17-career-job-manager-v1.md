@@ -17,6 +17,10 @@
 - Application documents live in `~/Documents/Career/Applications/<Company>_<Job>/`.
 - Company, Job, and Status are required.
 - Status is one of Application, Applied, Assessment, Interview, Offer, Closed.
+- Action is a fixed selector: Apply, Wait, Complete, Attend, Respond, Go.
+- Target is conditional and hidden/cleared for Wait.
+- Portal is optional and replaces the old `apply` metadata field.
+- UI is monochrome: black background, white text, normal weight, no zebra striping or decorative colors.
 - Resume and Letter imports copy source files and ignore source filenames.
 - Current Resume/Letter is indexless; older versions are `_1`, `_2`, etc.
 - Home search is live, case-insensitive, partial, and limited to Company, Job, Status, Contact.
@@ -31,9 +35,9 @@
 - Create: `tests/test_model.py`
 
 **Interfaces:**
-- Produces: `ApplicationRecord`, `STATUSES`, `DEFAULT_ACTIONS`, `normalize_deadline`, `display_deadline`, `sort_records`, `filter_records`.
+- Produces: `ApplicationRecord`, `STATUSES`, `ACTIONS`, `DEFAULT_ACTIONS`, `action_uses_target`, `normalize_deadline`, `display_deadline`, `sort_records`, `filter_records`.
 
-- [ ] Write failing tests for required fields, fixed statuses, deadline normalization/display, deadline ordering, undated-last behavior, and search fields.
+- [ ] Write failing tests for required fields, fixed statuses/actions, conditional Target behavior, legacy metadata migration, deadline normalization/display, deadline ordering, undated-last behavior, and search fields.
 - [ ] Run tests and confirm RED.
 - [ ] Implement minimal model/core behavior.
 - [ ] Run tests and confirm GREEN.
@@ -84,8 +88,9 @@
 
 - [ ] Implement macOS `osascript` chooser returning a selected path or `None` on cancel.
 - [ ] Implement Home table sorted by deadline, live `/` search, add, edit, delete-confirm, and quit.
-- [ ] Implement Add/Edit forms with fixed Status select, optional metadata, Description text, and Resume/Letter Choose buttons.
-- [ ] Wire save to `CareerStore` and default Action updates.
+- [ ] Implement Add/Edit forms with fixed Status and Action selects, conditional Target, optional Portal/Contact/Description, and Resume/Letter Choose buttons.
+- [ ] Wire save to `CareerStore`, default Action updates, Target visibility, and Version 1 → Version 2 metadata migration.
+- [ ] Apply monochrome UI styling across Home, forms, selects, buttons, search, and delete confirmation.
 - [ ] Add package metadata, installer, and usage documentation.
 - [ ] Syntax-compile UI files.
 

@@ -1,28 +1,60 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime, time
+import re
 from typing import Iterable
+from . import timing
 
-STATUSES = (
-    "Application",
-    "Applied",
-    "Assessment",
-    "Interview",
-    "Offer",
-    "Closed",
-)
+ACTIONS = ("Apply", "Wait", "Take", "Go", "Respond", "Archive", "Email", "Check")
 
-DEFAULT_ACTIONS = {
-    "Application": "Apply",
-    "Applied": "Wait",
-    "Assessment": "Complete",
-    "Interview": "Attend",
-    "Offer": "Respond",
-    "Closed": "None",
+# Only used when reading records written before Action became editable.
+_LEGACY_STATUS_ACTIONS = {
+    "Application": "Apply", "Applied": "Wait", "Assessment": "Take",
+    "Interview": "Go", "Offer": "Respond", "Closed": "Archive",
 }
+_LEGACY_ACTION_ALIASES = {"Complete": "Take", "Attend": "Go", "None": "Archive"}
+TARGET_ACTIONS = frozenset({"Apply", "Take", "Go", "Respond", "Email", "Check"})
 
 _DEADLINE_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%d")
+
+_HUMAN_DEADLINE_FORMATS_WITH_YEAR = (
+    "%b %d %Y %H:%M",
+    "%b %d %Y %I:%M %p",
+    "%b %d %Y %I %p",
+    "%b %d %Y",
+    "%B %d %Y %H:%M",
+    "%B %d %Y %I:%M %p",
+    "%B %d %Y %I %p",
+    "%B %d %Y",
+    "%d %b %Y %H:%M",
+    "%d %b %Y %I:%M %p",
+    "%d %b %Y %I %p",
+    "%d %b %Y",
+    "%d %B %Y %H:%M",
+    "%d %B %Y %I:%M %p",
+    "%d %B %Y %I %p",
+    "%d %B %Y",
+)
+
+_HUMAN_DEADLINE_FORMATS_NO_YEAR = (
+    "%b %d %H:%M",
+    "%b %d %I:%M %p",
+    "%b %d %I %p",
+    "%b %d",
+    "%B %d %H:%M",
+    "%B %d %I:%M %p",
+    "%B %d %I %p",
+    "%B %d",
+    "%d %b %H:%M",
+    "%d %b %I:%M %p",
+    "%d %b %I %p",
+    "%d %b",
+    "%d %B %H:%M",
+    "%d %B %I:%M %p",
+    "%d %B %I %p",
+    "%d %B",
+)
 
 
 @dataclass(slots=True)
@@ -30,55 +62,150 @@ class ApplicationRecord:
     id: str
     company: str
     job: str
-    status: str
     deadline: str = ""
-    action: str = ""
-    apply: str = ""
+    action: str = "Apply"
+    target: str = ""
+    portal: str = ""
     contact: str = ""
-    description: str = ""
+    brochure: str = ""
+    description_text: str = ""
+    form: str = ""
     resume: str = ""
     letter: str = ""
+    when: str = ""
+    import_id: str = ""
+    folder_name: str = ""
+    brief: str = ""
 
-    def validate(self) -> None:
+    company_id: str = ""
+    service: str = ""
+    coverage: list[str] = field(default_factory=list)
+    geography: list[str] = field(default_factory=list)
+    client_segment: str = ""
+    value: str = ""
+    _unknown: dict = field(default_factory=dict, repr=False)
+
+    def ensure_timing(self) -> None:
+        if not self.deadline and not self.when:
+            self.when = timing.current_season()
+
+    def validate(self, *, preserve_action: bool = False) -> None:
         self.company = self.company.strip()
         self.job = self.job.strip()
-        self.status = self.status.strip()
+        if not preserve_action:
+            self.action = self.action.strip()
         self.deadline = normalize_deadline(self.deadline)
-        self.action = self.action.strip() or DEFAULT_ACTIONS.get(self.status, "")
-        self.apply = self.apply.strip()
+        self.target = self.target.strip()
+        self.portal = self.portal.strip()
         self.contact = self.contact.strip()
-        self.description = self.description.strip()
+        self.brochure = self.brochure.strip()
+        self.description_text = self.description_text.strip()
+        self.form = self.form.strip()
         self.resume = self.resume.strip()
         self.letter = self.letter.strip()
 
         if not self.company:
             raise ValueError("Company is required.")
         if not self.job:
-            raise ValueError("Job is required.")
-        if self.status not in STATUSES:
-            raise ValueError(f"Status must be one of: {', '.join(STATUSES)}.")
+            raise ValueError("Program is required.")
+        if not preserve_action and self.action not in ACTIONS:
+            raise ValueError(f"Action must be one of: {', '.join(ACTIONS)}.")
+        self.ensure_timing()
+        if self.when:
+            timing.timing_start(self.when)
+        if not action_uses_target(self.action) and not self.import_id:
+            self.target = ""
 
     def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+        data = asdict(self)
+        extra = data.pop('_unknown')
+        return {**extra, **data}
 
     @classmethod
     def from_dict(cls, data: dict[str, str]) -> "ApplicationRecord":
-        return cls(**data)
+        payload = dict(data)
+        payload.setdefault("brochure", payload.pop("description", ""))
+
+        # Version 1 used `apply` for the persistent application-center URL.
+        if "portal" not in payload:
+            payload["portal"] = payload.pop("apply", "")
+        else:
+            payload.pop("apply", None)
+
+        payload.setdefault("target", "")
+        payload.setdefault("description_text", "")
+        payload.setdefault("form", "")
+
+        raw_action = str(payload.get("action", "")).strip()
+        if "status" in payload:
+            status = str(payload.pop("status")).strip()
+            action = _LEGACY_ACTION_ALIASES.get(raw_action, raw_action)
+            if action not in ACTIONS:
+                # Early versions allowed instructions in Action. Retain them
+                # in Target instead of discarding them during normalization.
+                if raw_action and not str(payload.get("target", "")).strip():
+                    payload["target"] = raw_action
+                action = _LEGACY_STATUS_ACTIONS.get(status, "Apply")
+            payload["action"] = action
+        else:
+            payload["action"] = raw_action or "Apply"
+
+        allowed = {field.name for field in fields(cls)} - {'_unknown'}
+        clean = {key: value for key, value in payload.items() if key in allowed}
+        clean['_unknown'] = {k: v for k, v in payload.items() if k not in allowed}
+        record = cls(**clean)
+        record.ensure_timing()
+        return record
+
+
+def action_uses_target(action: str) -> bool:
+    return action in TARGET_ACTIONS
+
+
+def _clean_deadline_text(value: str) -> str:
+    value = value.replace(",", " ")
+    value = re.sub(r"(?i)(\d(?::\d{2})?)(am|pm)\b", r"\1 \2", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _format_deadline(parsed: datetime, fmt: str) -> str:
+    if any(token in fmt for token in ("%H", "%I")):
+        return parsed.strftime("%Y-%m-%d %H:%M")
+    return parsed.strftime("%Y-%m-%d")
 
 
 def normalize_deadline(value: str) -> str:
-    value = value.strip()
+    value = _clean_deadline_text(value)
     if not value:
         return ""
+
     for fmt in _DEADLINE_FORMATS:
         try:
             parsed = datetime.strptime(value, fmt)
         except ValueError:
             continue
-        if fmt.endswith("%H:%M"):
-            return parsed.strftime("%Y-%m-%d %H:%M")
-        return parsed.strftime("%Y-%m-%d")
-    raise ValueError("Deadline must use YYYY-MM-DD or YYYY-MM-DD HH:MM.")
+        return _format_deadline(parsed, fmt)
+
+    for fmt in _HUMAN_DEADLINE_FORMATS_WITH_YEAR:
+        try:
+            parsed = datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+        return _format_deadline(parsed, fmt)
+
+    current_year = datetime.now().year
+    for fmt in _HUMAN_DEADLINE_FORMATS_NO_YEAR:
+        try:
+            parsed = datetime.strptime(f"{value} {current_year}", f"{fmt} %Y")
+        except ValueError:
+            continue
+        return _format_deadline(parsed, fmt)
+
+    raise ValueError(
+        "Deadline examples: Sep 25, Sep 25 14:00, Sep 25 2pm, "
+        "25 Sep, or 2026-09-25 14:00."
+    )
 
 
 def _parse_deadline(value: str) -> datetime:
@@ -94,7 +221,7 @@ def display_deadline(value: str) -> str:
     if not value:
         return "—"
     parsed = _parse_deadline(value)
-    month_day = parsed.strftime("%b %d")
+    month_day = f"{parsed.day} {parsed.strftime('%b')}"
     if len(value) > 10:
         return f"{month_day} {parsed.strftime('%H:%M')}"
     return month_day
@@ -102,9 +229,19 @@ def display_deadline(value: str) -> str:
 
 def sort_records(records: Iterable[ApplicationRecord]) -> list[ApplicationRecord]:
     def key(record: ApplicationRecord):
-        if not record.deadline:
-            return (1, datetime.max, record.company.casefold(), record.job.casefold())
-        return (0, _parse_deadline(record.deadline), record.company.casefold(), record.job.casefold())
+        precision = 0
+        if record.deadline:
+            start = _parse_deadline(record.deadline)
+        else:
+            when = record.when or timing.current_season()
+            precision = (0 if timing.timing_precision(when) == 3 else
+                         1 if timing.timing_precision(when) == 2 else
+                         2 if ".." in when else 3)
+            day = timing.timing_start(when)
+            start = datetime.combine(day, time.min)
+        # Only Check forms a separate Action group.
+        action_priority = record.action == "Check"
+        return (action_priority, precision, start, record.company.casefold(), record.job.casefold())
 
     return sorted(records, key=key)
 
@@ -119,7 +256,7 @@ def filter_records(records: Iterable[ApplicationRecord], query: str) -> list[App
         for record in records_list
         if any(
             query in value.casefold()
-            for value in (record.company, record.job, record.status, record.contact)
+            for value in (record.company, record.job, record.action, record.contact)
         )
     ]
     return sort_records(filtered)

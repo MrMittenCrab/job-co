@@ -25,3 +25,13 @@ def choose_file(prompt: str) -> Path | None:
         raise RuntimeError(result.stderr.strip() or "Unable to open file chooser.")
     selected = result.stdout.strip()
     return Path(selected) if selected else None
+
+
+def reveal_file(path: Path) -> None:
+    """Reveal the managed document in Finder without opening or editing it."""
+    if not path.is_file():
+        raise ValueError("No managed file exists.")
+    if platform.system() != "Darwin":
+        raise RuntimeError("View is available only on macOS.")
+    subprocess.run(["open", "-R", str(path.resolve())], check=True,
+                   capture_output=True, text=True)

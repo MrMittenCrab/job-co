@@ -4,8 +4,8 @@ import pytest
 
 from career_job_manager.model import (
     ApplicationRecord,
-    DEFAULT_ACTIONS,
-    STATUSES,
+    ACTIONS,
+    action_uses_target,
     display_deadline,
     filter_records,
     normalize_deadline,
@@ -18,12 +18,13 @@ def make_record(**overrides):
         "id": "1",
         "company": "HSBC",
         "job": "Global Banking Graduate",
-        "status": "Application",
         "deadline": "",
         "action": "Apply",
-        "apply": "",
+        "target": "https://example.com/apply",
+        "portal": "",
         "contact": "",
-        "description": "",
+        "brochure": "",
+        "form": "",
         "resume": "",
         "letter": "",
     }
@@ -34,70 +35,177 @@ def make_record(**overrides):
 def test_required_fields_reject_blank_company_and_job():
     with pytest.raises(ValueError, match="Company"):
         make_record(company="   ").validate()
-    with pytest.raises(ValueError, match="Job"):
+    with pytest.raises(ValueError, match="Program"):
         make_record(job="").validate()
 
 
-def test_status_is_fixed():
-    assert STATUSES == (
-        "Application",
-        "Applied",
-        "Assessment",
-        "Interview",
-        "Offer",
-        "Closed",
-    )
-    with pytest.raises(ValueError, match="Status"):
-        make_record(status="Phone Screen").validate()
+def test_action_is_selected_and_validated():
+    for action in ACTIONS:
+        record = make_record(action=action)
+        record.validate()
+        assert record.action == action
+    with pytest.raises(ValueError, match="Action"):
+        make_record(action="Unknown").validate()
 
 
-def test_default_actions_match_target():
-    assert DEFAULT_ACTIONS["Application"] == "Apply"
-    assert DEFAULT_ACTIONS["Applied"] == "Wait"
-    assert DEFAULT_ACTIONS["Assessment"] == "Complete"
-    assert DEFAULT_ACTIONS["Interview"] == "Attend"
-    assert DEFAULT_ACTIONS["Offer"] == "Respond"
-    assert DEFAULT_ACTIONS["Closed"] == "None"
+def test_target_visibility_depends_on_selected_action():
+    for action in ("Apply", "Take", "Go", "Respond", "Email"):
+        assert action_uses_target(action)
+    for action in ("Wait", "Archive"):
+        record = make_record(action=action, target="stale URL")
+        record.validate()
+        assert record.target == ""
+        assert not action_uses_target(action)
+
+
+def test_old_apply_field_migrates_to_optional_portal_and_action_rederives():
+    record = ApplicationRecord.from_dict({
+        "id": "legacy",
+        "company": "HSBC",
+        "job": "Analyst",
+        "status": "Interview",
+        "deadline": "",
+        "action": "Attend",
+        "apply": "https://old.example/portal",
+        "contact": "",
+        "brochure": "",
+        "resume": "",
+        "letter": "",
+    })
+    record.validate()
+    assert record.portal == "https://old.example/portal"
+    assert record.action == "Go"
+    assert record.form == ""
+    assert "apply" not in record.to_dict()
 
 
 def test_deadline_normalization_accepts_date_and_datetime():
     assert normalize_deadline("2026-09-18") == "2026-09-18"
     assert normalize_deadline(" 2026-09-18 23:59 ") == "2026-09-18 23:59"
     assert normalize_deadline("") == ""
-    with pytest.raises(ValueError, match="YYYY-MM-DD"):
-        normalize_deadline("Sep 18")
+    assert normalize_deadline("Sep 18") == f"{datetime.now().year}-09-18"
 
 
 def test_deadline_display_is_compact():
-    assert display_deadline("2026-09-18") == "Sep 18"
-    assert display_deadline("2026-09-18 23:59") == "Sep 18 23:59"
+    assert display_deadline("2026-09-18") == "18 Sep"
+    assert display_deadline("2026-09-18 23:59") == "18 Sep 23:59"
     assert display_deadline("") == "—"
 
 
-def test_sort_records_uses_deadline_and_puts_undated_last():
+def test_sort_records_uses_deadline_and_season_for_undated():
     records = [
-        make_record(id="c", company="Cathay", deadline=""),
+        make_record(id="c", company="Cathay", deadline="", when="2026-fall"),
         make_record(id="b", company="HSBC", deadline="2026-09-20 18:00"),
         make_record(id="a", company="P&G", deadline="2026-09-18 23:59"),
     ]
     assert [record.id for record in sort_records(records)] == ["a", "b", "c"]
 
 
-def test_filter_records_searches_only_company_job_status_contact_and_keeps_order():
+@pytest.mark.parametrize("action", ["Apply", "Wait", "Take", "Go", "Respond", "Email"])
+@pytest.mark.parametrize("timing", [
+    {"deadline": "2027-10-01"},
+    {"when": "2027-fall"},
+])
+@pytest.mark.parametrize("query", ["", "HSBC"])
+def test_active_actions_precede_check_regardless_of_time(action, timing, query):
+    records = [
+        make_record(id="check", action="Check", deadline="2026-01-01"),
+        make_record(id="active", action=action, **timing),
+        make_record(id="archive", action="Archive", deadline="2025-01-01"),
+    ]
+    assert [record.id for record in filter_records(records, query)] == [
+        "archive", "active", "check",
+    ]
+
+
+@pytest.mark.parametrize("action", ["Apply", "Check", "Archive"])
+def test_action_groups_preserve_exact_then_fuzzy_time_order(action):
+    records = [
+        make_record(id="fuzzy", action=action, when="2026-01"),
+        make_record(id="late", action=action, deadline="2026-10-01"),
+        make_record(id="early", action=action, deadline="2026-09-01"),
+    ]
+    assert [record.id for record in sort_records(records)] == ["early", "late", "fuzzy"]
+
+
+def test_filter_records_searches_company_job_action_contact_and_keeps_order():
     records = [
         make_record(id="2", company="HSBC", deadline="2026-09-20", contact="Jane Smith"),
         make_record(
             id="1",
             company="BCG",
             job="Associate Analyst",
-            status="Interview",
+            action="Go",
             deadline="2026-09-18",
-            description="HSBC appears only in description",
+            brochure="BCG_Associate-Analyst_Brochure.pdf",
         ),
     ]
     assert [r.id for r in filter_records(records, "hsbc")] == ["2"]
     assert [r.id for r in filter_records(records, "analyst")] == ["1"]
-    assert [r.id for r in filter_records(records, "INTERVIEW")] == ["1"]
+    assert [r.id for r in filter_records(records, "GO")] == ["1"]
     assert [r.id for r in filter_records(records, "jane")] == ["2"]
     assert filter_records(records, "description") == []
     assert [r.id for r in filter_records(records, "")] == ["1", "2"]
+
+
+def test_deadline_accepts_human_month_day_with_current_year(monkeypatch):
+    from career_job_manager import model
+
+    class FixedDateTime(model.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 17, 12, 0)
+
+    monkeypatch.setattr(model, "datetime", FixedDateTime)
+    assert model.normalize_deadline("Sep 25") == "2026-09-25"
+    assert model.normalize_deadline("25 Sep") == "2026-09-25"
+    assert model.normalize_deadline("Sep 25 14:00") == "2026-09-25 14:00"
+    assert model.normalize_deadline("Sep 25 2pm") == "2026-09-25 14:00"
+
+
+def test_deadline_tolerates_commas_and_odd_spacing(monkeypatch):
+    from career_job_manager import model
+
+    class FixedDateTime(model.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 9, 17, 12, 0)
+
+    monkeypatch.setattr(model, "datetime", FixedDateTime)
+    assert model.normalize_deadline("  Sep   25 ,   2 pm ") == "2026-09-25 14:00"
+    assert model.normalize_deadline("Sep 25, 2:30pm") == "2026-09-25 14:30"
+    assert model.normalize_deadline("Sep, 25") == "2026-09-25"
+    assert model.normalize_deadline("25,   Sep,  2027  ,  9:05 am") == "2027-09-25 09:05"
+
+
+def test_deadline_keeps_iso_inputs_working():
+    assert normalize_deadline("2027-01-15") == "2027-01-15"
+    assert normalize_deadline("2027-01-15 08:30") == "2027-01-15 08:30"
+
+
+def test_description_text_is_independent_from_description_file():
+    record = make_record(
+        brochure="HSBC_Global-Banking-Graduate_Brochure.pdf",
+        description_text="  Full pasted job description.  ",
+    )
+    record.validate()
+    assert record.brochure == "HSBC_Global-Banking-Graduate_Brochure.pdf"
+    assert record.description_text == "Full pasted job description."
+
+
+def test_legacy_records_default_description_text_to_empty():
+    record = ApplicationRecord.from_dict({
+        "id": "legacy-desc",
+        "company": "HSBC",
+        "job": "Analyst",
+        "deadline": "",
+        "action": "Wait",
+        "target": "",
+        "portal": "",
+        "contact": "",
+        "description": "HSBC_Analyst_Brochure.pdf",
+        "form": "",
+        "resume": "",
+        "letter": "",
+    })
+    assert record.description_text == ""

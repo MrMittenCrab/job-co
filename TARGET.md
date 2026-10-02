@@ -1,60 +1,111 @@
-# Career Job Manager — Version 1 Design
+> UX revision (2026-09-19): The Action-based behavior in README.md supersedes the historical Status/edit-mode/description-preview requirements below. Enter only saves and returns home from every field; Ctrl-S does not save. Right cycles choices (including Email), Left leaves the choice interaction keeping the value, and Right opens file selection. Wrapped values share one column on every line, without changing stored text. Action is directly selected (including Email); Status is migration-only. Text fields accept typing on focus, Enter saves and returns home, and full wrapping Description is last. CLI creation uses -C/-R/-D (or --company/--role/--deadline) and the normal store without opening the UI.
+
+# Career Job Manager — Version 1 Target
 
 ## Goal
 
-Build a minimal macOS terminal application invoked with `job` that answers one question: **what job application needs attention next?** It keeps each specific job application's metadata, resume, and cover letter together under `~/Documents/Career`.
+Build a minimal macOS terminal application invoked with `job` that answers one question: **what job application needs attention next?** It keeps each specific job application's metadata and files together under `~/Documents/Career`.
 
 ## Scope
 
-Version 1 has exactly three screens:
+Version 1 has three user-facing states:
 
 1. Home
 2. Add
-3. Edit
+3. Application
+
+There is no separate Edit screen. Existing applications open directly into the Application screen and are edited in place. Pressing `a` from Home opens a distinct `ADD` state with blank/default values; it uses the same plain row interaction model as an existing Application.
 
 There is no separate agenda, resume library, cover-letter library, category system, AI integration, contact manager, calendar, or document-generation system in Version 1.
 
+## Visual design
+
+The interface is deliberately plain terminal text:
+
+- black background;
+- white text;
+- the terminal's existing monospace font and normal weight throughout;
+- no decorative colors;
+- no zebra striping;
+- no bold headings;
+- no borders;
+- no outlines;
+- no reverse-color highlighting;
+- the currently selected row is indicated only by a leading `>` character;
+- mouse interaction is disabled;
+- normal navigation is keyboard-only with `↑`, `↓`, and `Enter`.
+
+The ordinary application view should visually read like plain text, for example:
+
+```text
+  Status      Applied
+  Action      Wait
+  Portal      https://company.com/my-applications
+```
+
+When a row is selected it becomes:
+
+```text
+> Status      Applied
+```
+
 ## Home
 
-The home screen is the agenda and application list combined.
+The Home screen is the agenda and application list combined.
 
 Columns:
 
 - Deadline
 - Company
 - Job
-- Status
+- Action
 
 Rows with a deadline are sorted ascending. Rows without a deadline appear afterward.
-
-Example:
 
 ```text
 APPLICATIONS
 
-  Deadline        Company        Job                         Status
-> Sep 18 23:59    P&G            Finance Graduate            Application
-  Sep 20 18:00    HSBC           Global Banking Graduate     Assessment
-  Sep 25 14:00    BCG            Associate                   Interview
-  —               Cathay         Cargo Graduate              Applied
+  Deadline        Company        Job                         Action
+> Sep 18 23:59    P&G            Finance Graduate            Apply
+  Sep 20 18:00    HSBC           Global Banking Graduate     Take
+  Sep 25 14:00    BCG            Associate                   Go
+  —               Cathay         Cargo Graduate              Wait
 
-  a add     Enter edit     / search     d delete     q quit
+  a add     Enter open     / search     d delete     q quit
 ```
+
+## Search
+
+Press `/` from Home to open live search.
+
+Search behavior:
+
+- case-insensitive partial matching;
+- searches only `Company`, `Job`, `Status`, and `Contact`;
+- matching rows remain sorted by Deadline ascending;
+- `↑` / `↓` moves through matches;
+- `Enter` opens the selected application;
+- `Esc` clears search and restores the full list;
+- Version 1 does not search inside Resume, Letter, Description, or Form contents.
 
 ## Application fields
 
-Every application contains the following one-word fields:
+Every application contains these one-word fields:
 
 - Company
 - Job
 - Status
 - Deadline
 - Action
-- Apply
+- Target
+- Portal
 - Contact
-- Description
 - Resume
 - Letter
+- Description
+- Form
+
+Description also has an independent pasted-text value displayed directly beneath its file row. This text value is not a separate top-level function or label.
 
 ### Required fields
 
@@ -65,26 +116,70 @@ Every application contains the following one-word fields:
 ### Optional fields
 
 - Deadline
-- Apply
+- Target
+- Portal
 - Contact
-- Description
 - Resume
 - Letter
+- Description file
+- Description text
+- Form
 
-### Action
+## Application screen
 
-`Action` is always present. It may be system-generated from Status or manually edited.
+There is no separate Edit screen.
 
-Suggested default actions:
+For an existing application, `Enter` from Home opens the application directly:
 
-- Application → Apply
-- Applied → Wait
-- Assessment → Complete
-- Interview → Attend
-- Offer → Respond
-- Closed → None
+```text
+HSBC — Global Banking Graduate
 
-### Status
+  Company      HSBC
+  Job          Global Banking Graduate
+> Status       Applied
+  Deadline     Sep 25
+  Action       Wait
+  Portal       https://company.com/my-applications
+  Contact      Jane Smith
+
+  Resume       HSBC_Global-Banking-Graduate_Resume.docx
+  Letter       Choose
+  Description  Choose
+                Investment banking graduate role covering markets and...
+  Form         Choose
+
+↑ ↓ navigate     Enter edit     s save     Esc back
+```
+
+Pressing `a` from Home opens the `ADD` state with the same row layout and blank/default values.
+
+### In-place text editing
+
+All editable text fields are edited directly on their row. There is no text-edit popup or modal.
+
+Text fields:
+
+- Company
+- Job
+- Deadline
+- Target when visible
+- Portal
+- Contact
+- the unlabeled Description text row beneath `Description  Choose`
+
+Interaction:
+
+- select a text row with `↑` / `↓`;
+- press `Enter` to start editing on that row;
+- type normally;
+- paste with the terminal's normal paste shortcut while the row is being edited; Textual bracketed paste is accepted by the row;
+- pasted content in ordinary one-line fields has line breaks/tabs collapsed to spaces;
+- pasted Description text preserves line breaks, with tabs normalized to spaces;
+- use left/right, Home, End, Backspace, and Delete while editing;
+- press `Enter` to accept the edited text;
+- press `Esc` to cancel the current text edit.
+
+## Status
 
 Status is a fixed selector, never free text:
 
@@ -95,78 +190,212 @@ Status is a fixed selector, never free text:
 - Offer
 - Closed
 
-The current Status determines what the current Deadline means. There is only one deadline field.
+The selector expands in place to the right only after pressing `Enter` on the Status row.
 
-### Description
-
-Description is optional text. It may contain either:
-
-- a URL; or
-- pasted job-description text.
-
-It is not a file attachment.
-
-## Add screen
+Example:
 
 ```text
-ADD
-
-Company       _
-Job           _
-Status        Application
-Deadline      —
-Action        Apply
-Apply         —
-Contact       —
-Description   —
-
-Resume        Choose
-Letter        Choose
-
-s save     esc cancel
+> Status       Applied       Application
+                             > Applied
+                               Assessment
+                               Interview
+                               Offer
+                               Closed
 ```
 
-`Resume` and `Letter` use one operation only: **Choose**. On macOS, Choose opens the native file picker.
+Selector rules:
 
-## Edit screen
+- all option text begins at the same horizontal coordinate;
+- the `>` selection marker occupies its own fixed column and must never shift option text left or right;
+- `↑` / `↓` selects an option;
+- `Enter` confirms;
+- `Esc` collapses without changing the value.
 
-Edit has the same structure as Add and exposes the same fields.
+There is only one Deadline field. Its meaning is determined by the current Status.
+
+## Action
+
+Action is read-only and automatic. The user never edits Action manually.
+
+Status → Action mapping:
+
+- Application → Apply
+- Applied → Wait
+- Assessment → Take
+- Interview → Go
+- Offer → Respond
+- Closed → Archive
+
+Changing Status updates Action immediately.
+
+Home displays Action rather than Status.
+
+## Target
+
+Target is conditional text associated with the automatic Action.
+
+Target is shown for:
+
+- Apply
+- Take
+- Go
+- Respond
+
+Target is hidden and cleared for:
+
+- Wait
+- Archive
+
+Target may contain a URL, location, or short instruction. Its contents never determine Action.
+
+Examples:
 
 ```text
-EDIT
-
-Company       HSBC
-Job           Global Banking Graduate
-Status        Interview
-Deadline      Oct 4 14:00
-Action        Attend
-Apply         https://...
-Contact       Jane Smith
-Description   https://...
-
-Resume        HSBC_Global-Banking-Graduate_Resume.docx    Choose
-Letter        HSBC_Global-Banking-Graduate_Letter.docx    Choose
-
-s save     esc cancel
+Status    Application
+Action    Apply
+Target    https://company.com/job/123
 ```
-
-If Company or Job changes, the application's folder and canonical Resume/Letter filenames are renamed automatically.
-
-## Career folder
-
-The application uses this fixed root:
 
 ```text
-~/Documents/Career
+Status    Assessment
+Action    Take
+Target    https://assessment.example.com
 ```
 
-Application documents live under:
+```text
+Status    Interview
+Action    Go
+Target    Central Plaza, 35/F
+```
+
+An interview Target may also be an online meeting URL; Action remains `Go` because Action depends only on Status.
+
+## Portal
+
+Portal is an optional URL or short text value for the permanent place where an application can be viewed or managed.
+
+Example:
+
+```text
+Portal    https://company.com/my-applications
+```
+
+Some applications have no Portal.
+
+## Contact
+
+Contact is optional plain text containing only the person's name.
+
+## Description
+
+Description has two independent optional inputs that may coexist:
+
+1. a managed Description file selected with `Choose`;
+2. pasted or typed Description text immediately beneath the file row.
+
+The file row stays fixed and aligned with Resume, Letter, and Form:
+
+```text
+  Resume       Choose
+  Letter       Choose
+  Description  Choose
+                Pasted description text appears here…
+  Form         Choose
+```
+
+The text row has no separate label. In its normal collapsed state it is one line. Whitespace is collapsed for the preview only, and long text is truncated with an ellipsis. The complete pasted text is preserved in metadata.
+
+Selecting the Description text row and pressing `Enter` expands it in place and shows the full text for viewing/editing. Pressing `Enter` again accepts the edit and returns to the compact ellipsis preview.
+
+Choosing a Description file does not erase Description text, and editing/pasting Description text does not replace the Description file.
+
+## Deadline
+
+Deadline accepts both canonical and compact human input. Stored values are normalized internally, while the UI keeps the compact display.
+
+Accepted examples include:
+
+```text
+Sep 25
+Sep 25 14:00
+Sep 25 2pm
+Sep 25, 2:30pm
+25 Sep
+Jan 15 2027
+2027-01-15
+2027-01-15 08:30
+```
+
+Rules:
+
+- if the year is omitted, use the current calendar year;
+- commas are optional separators and are ignored for parsing;
+- extra or oddly placed spaces are collapsed;
+- both 24-hour time and `am` / `pm` time are accepted;
+- a date without a time remains a date without an invented time;
+- Home displays deadlines compactly, such as `Sep 25` or `Sep 25 14:00`.
+
+## Files
+
+Resume, Letter, Description, and Form are optional managed files. Description may additionally have independent pasted text as defined above.
+
+Each file row displays the current filename or `Choose` when empty.
+
+Selecting one of these rows and pressing `Enter` opens the native macOS file chooser. The chosen source may come from anywhere on the Mac.
+
+The source file is **moved** into the corresponding job folder under:
 
 ```text
 ~/Documents/Career/Applications/<Company>_<Job>/
 ```
 
-Example:
+The incoming filename is ignored completely. Company + Job + file type determine the canonical filename.
+
+For:
+
+```text
+Company = HSBC
+Job     = Global Banking Graduate
+```
+
+examples are:
+
+```text
+HSBC_Global-Banking-Graduate_Resume.docx
+HSBC_Global-Banking-Graduate_Letter.docx
+HSBC_Global-Banking-Graduate_Description.pdf
+HSBC_Global-Banking-Graduate_Form.pdf
+```
+
+Downloaded names such as `Resume (1).docx`, `Cover Letter (2).docx`, or `Application Form (3).pdf` never survive import.
+
+### File versioning
+
+Each of the four file types is versioned independently.
+
+The newest version is always indexless. When a new version is chosen, older versions shift upward:
+
+```text
+..._Resume.docx      current
+..._Resume_1.docx    previous
+..._Resume_2.docx    older
+```
+
+The same rule applies to Letter, Description, and Form.
+
+The new source is verified as readable before existing versions are shifted.
+
+If Company or Job changes, the corresponding application folder and all managed filenames are renamed automatically.
+
+## Storage
+
+Root:
+
+```text
+~/Documents/Career/
+```
+
+Structure:
 
 ```text
 ~/Documents/Career/
@@ -176,153 +405,53 @@ Example:
         ├── HSBC_Global-Banking-Graduate_Resume.docx
         ├── HSBC_Global-Banking-Graduate_Resume_1.docx
         ├── HSBC_Global-Banking-Graduate_Letter.docx
-        └── HSBC_Global-Banking-Graduate_Letter_1.docx
+        ├── HSBC_Global-Banking-Graduate_Description.pdf
+        └── HSBC_Global-Banking-Graduate_Form.pdf
 ```
 
-The metadata store is a human-readable JSON file at `~/Documents/Career/applications.json`.
+Metadata is stored in `applications.json`, including the full optional Description text; ordinary user documents remain normal files visible through Finder, Yazi, or Terminal.
 
-## Document import and naming
+## Keyboard contract
 
-The incoming filename is ignored. A file chosen anywhere on the Mac is copied into the corresponding job folder.
-
-Canonical current names:
+Home:
 
 ```text
-<Company>_<Job>_Resume.<ext>
-<Company>_<Job>_Letter.<ext>
+↑ / ↓     move
+Enter     open application
+ a        add application
+ /        search
+ d        delete application
+ q        quit
 ```
 
-Examples of source names that must not survive:
+Application:
 
 ```text
-Resume (1).docx
-Resume FINAL.docx
-Cover Letter (2).docx
+↑ / ↓     move between editable/selectable rows
+Enter     edit/select/choose on current row
+ s        save application
+Esc       cancel current edit/selector, otherwise return without saving
 ```
 
-For an HSBC Global Banking Graduate application they become:
-
-```text
-HSBC_Global-Banking-Graduate_Resume.docx
-HSBC_Global-Banking-Graduate_Letter.docx
-```
-
-The source file is copied, not moved.
-
-## Resume and Letter versioning
-
-The newest document is always indexless.
-
-```text
-Resume.docx      current
-Resume_1.docx    previous
-Resume_2.docx    older
-```
-
-Before importing a new Resume or Letter:
-
-1. Verify the selected source is readable.
-2. Shift existing indexed versions upward, oldest first.
-3. Rename the current indexless file to `_1`.
-4. Copy the new file into a temporary file in the destination folder.
-5. Atomically rename the temporary file to the indexless canonical name.
-
-This behavior applies independently to Resume and Letter.
-
-If the new file uses a different extension, the new indexless file uses the new extension while the older version keeps its original extension.
-
-## Naming normalization
-
-Folder and document stems derive only from Company and Job.
-
-Normalization rules:
-
-- trim surrounding whitespace;
-- collapse repeated whitespace;
-- replace whitespace inside each Company/Job component with `-`;
-- remove characters unsafe in macOS filenames (`/`, `:`, NUL);
-- join Company and Job with `_`;
-- preserve Unicode letters and ordinary punctuation that is safe on macOS.
-
-Example:
-
-```text
-Company: HSBC
-Job: Global Banking Graduate
-Stem: HSBC_Global-Banking-Graduate
-```
-
-## Search and delete
-
-Home supports `/` for live search. Pressing `/` opens a search field at the bottom of the Home screen. As the user types, the application list filters immediately.
-
-Search behavior:
-
-- search is case-insensitive;
-- simple partial matching is used;
-- search checks Company, Job, Status, and Contact;
-- no wildcard or special query syntax is required;
-- filtered results remain sorted by Deadline using the same Home-screen ordering rules;
-- Up/Down moves through matching results;
-- Enter opens the selected matching application;
-- Esc clears the search and restores the full application list.
-
-Examples:
-
-```text
-/ hsbc       → applications with HSBC in Company
-/ analyst    → applications with Analyst in Job
-/ interview  → applications whose Status is Interview
-/ jane       → applications whose Contact contains Jane
-```
-
-Version 1 does not search inside Description text or the contents of Resume or Letter files.
-
-`d` deletes the selected application only after confirmation. Deletion removes both its metadata record and its corresponding job folder under `~/Documents/Career/Applications`.
-
-## Implementation architecture
-
-Use Python 3.11+.
-
-- `textual` provides the terminal UI.
-- Python `json` stores metadata.
-- Python `pathlib`, `shutil`, and `os.replace` manage files safely.
-- macOS `osascript` opens the native file chooser.
-- `pytest` tests sorting, validation, naming, versioning, metadata persistence, and folder renaming.
-
-The `job` command is installed as a Python console script.
-
-## Explicit non-goals for Version 1
-
-Do not implement:
-
-- job categories;
-- multiple contacts or contact details;
-- separate agenda/calendar screen;
-- ChatGPT/API integration;
-- resume generation from structured text;
-- Word formatting automation;
-- email sending;
-- application-form automation;
-- cloud sync;
-- document preview inside the TUI;
-- arbitrary status creation.
-
-These can be added later without changing the Version 1 application model.
+Action is displayed but skipped by keyboard navigation because it is read-only and derived automatically.
 
 ## Acceptance criteria
 
-Version 1 is complete when:
+Version 1 is accepted when:
 
-1. Running `job` opens the deadline-sorted Home screen.
-2. A user can add an application with Company, Job, Status and optional fields.
-3. Status can only be chosen from the fixed list.
-4. A user can edit every field from one Edit screen.
-5. Resume and Letter can be selected with the native macOS file picker.
-6. Selected documents are copied to the correct job folder and canonically renamed.
-7. Replacing a Resume or Letter shifts old versions to `_1`, `_2`, etc. while keeping the newest indexless.
-8. Editing Company or Job renames the application folder and document stems consistently.
-9. Home sorts dated applications by earliest deadline and puts undated applications last.
-10. Search filters live, case-insensitively, across Company, Job, Status, and Contact while preserving deadline order; Esc restores the full list.
-11. Delete requires confirmation and removes the application and its job folder.
-12. Tests pass for core non-GUI behavior.
+1. `job` opens the Home screen.
+2. Home shows Deadline, Company, Job, and automatic Action.
+3. Applications are sorted by ascending Deadline with undated applications last.
+4. Search is live, partial, case-insensitive, and searches Company, Job, Status, and Contact.
+5. Existing applications open directly into the Application screen; there is no separate Edit screen.
+6. All text fields edit in place on their existing rows and accept terminal paste while editing.
+7. Status is an inline fixed selector whose option text never shifts horizontally as selection moves.
+8. Action is derived solely from Status using Apply / Wait / Take / Go / Respond / Archive.
+9. Target visibility follows Action and Target content never changes Action.
+10. Deadline accepts compact dates, optional commas, irregular whitespace, optional times, and missing years default to the current year.
+11. Resume, Letter, Description, and Form all use the native macOS Choose dialog.
+12. Description also supports independent pasted/typed text beneath its Choose row; long previews use an ellipsis and `Enter` reveals the full text in place.
+13. Selected files are moved into the correct `~/Documents/Career/Applications/<Company>_<Job>/` folder and renamed canonically.
+14. New file versions become indexless and older versions become `_1`, `_2`, and so on.
+15. Changing Company or Job renames the application folder and all managed documents consistently.
+16. Mouse interaction does not drive navigation or editing.

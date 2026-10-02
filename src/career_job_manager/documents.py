@@ -6,7 +6,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-_DOCUMENT_TYPES = {"Resume", "Letter"}
+_DOCUMENT_TYPES = {"Resume", "Letter", "Description", "Brochure", "Form"}
 
 
 def _validate_kind(kind: str) -> None:
@@ -42,6 +42,7 @@ def current_document_name(folder: Path, stem: str, kind: str) -> str:
 
 
 def import_versioned_document(source: Path, folder: Path, stem: str, kind: str) -> str:
+    """Copy a source to the canonical managed name, replacing prior copies."""
     _validate_kind(kind)
     source = Path(source).expanduser()
     if not source.is_file():
@@ -53,38 +54,26 @@ def import_versioned_document(source: Path, folder: Path, stem: str, kind: str) 
         raise ValueError(f"Selected {kind} file is not readable.") from exc
 
     folder.mkdir(parents=True, exist_ok=True)
+    try:
+        if source.resolve().parent == folder.resolve():
+            raise ValueError(f"Choose a {kind} file outside this managed application folder.")
+    except OSError:
+        pass
+
     extension = source.suffix
     base = f"{stem}_{kind}"
     managed = _managed(folder, stem, kind)
 
-    renames: list[tuple[Path, Path]] = []
     temp_path = folder / f".{base}.{uuid.uuid4().hex}.tmp{extension}"
     destination = folder / f"{base}{extension}"
-
     try:
-        for index, path in sorted((pair for pair in managed if pair[0] > 0), reverse=True):
-            new_path = folder / f"{base}_{index + 1}{path.suffix}"
-            path.rename(new_path)
-            renames.append((path, new_path))
-
-        current = [path for index, path in managed if index == 0]
-        if current:
-            path = current[0]
-            new_path = folder / f"{base}_1{path.suffix}"
-            path.rename(new_path)
-            renames.append((path, new_path))
-
         shutil.copy2(source, temp_path)
         os.replace(temp_path, destination)
-    except Exception:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
-        if destination.exists() and destination not in [old for old, _ in renames]:
-            destination.unlink(missing_ok=True)
-        for old, new in reversed(renames):
-            if new.exists() and not old.exists():
-                new.rename(old)
-        raise
+        for _, path in managed:
+            if path != destination:
+                path.unlink()
+    finally:
+        temp_path.unlink(missing_ok=True)
 
     return destination.name
 
@@ -102,3 +91,18 @@ def rename_managed_documents(folder: Path, old_stem: str, new_stem: str) -> None
             rename_pairs.append((path, destination))
     for source, destination in rename_pairs:
         source.rename(destination)
+
+
+def migrate_brochure(folder: Path, stem: str, name: str) -> str:
+    """Rename legacy managed Description files without changing their contents."""
+    legacy = _managed(folder, stem, "Description")
+    pairs = [(path, folder / path.name.replace(f"{stem}_Description", f"{stem}_Brochure", 1))
+             for _, path in legacy]
+    for source, destination in pairs:
+        if destination.exists():
+            raise ValueError(f"Cannot migrate document because {destination.name} already exists.")
+    for source, destination in pairs:
+        source.rename(destination)
+        if name == source.name:
+            name = destination.name
+    return name

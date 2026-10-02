@@ -1,0 +1,543 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Company intelligence import",
+  "description": "Company-only, canonical combined, legacy applications, and normalized version-1 job imports. Unknown fields remain open. Research constraints on Value, Momentum and amounts are intentionally enforced even though the current importer is permissive. Application-level date, duplicate-ID and filesystem checks still apply.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "Canonical storage writes 8; import does not validate this marker."
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "companies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/company"
+      }
+    },
+    "jobs": {
+      "type": "array"
+    },
+    "applications": {}
+  },
+  "additionalProperties": true,
+  "anyOf": [
+    {
+      "required": [
+        "companies"
+      ]
+    },
+    {
+      "required": [
+        "jobs"
+      ]
+    },
+    {
+      "required": [
+        "applications"
+      ]
+    }
+  ],
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "schema_version"
+        ],
+        "not": {
+          "required": [
+            "jobs"
+          ],
+          "properties": {
+            "jobs": {
+              "contains": {
+                "type": "object",
+                "required": [
+                  "job"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/normalizedJob"
+            }
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "required": [
+            "jobs"
+          ]
+        },
+        "then": {
+          "properties": {
+            "jobs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/job"
+              }
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "applications": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/job"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonblank": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "value": {
+      "enum": [
+        "Research",
+        "Access",
+        "Execution",
+        "Financing",
+        "Performance",
+        "Risk",
+        "Distribution",
+        "Technology",
+        "Service",
+        "Trust",
+        null,
+        ""
+      ],
+      "description": "One controlled Value tag; null or the legacy empty string means unknown."
+    },
+    "terms": {
+      "anyOf": [
+        {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "period": {
+      "type": [
+        "string",
+        "number",
+        "null"
+      ],
+      "description": "Use consistent period strings for research. Numeric periods are also accepted by the implementation; periods are not calendar-parsed."
+    },
+    "amount": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "amount": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "units": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period": {
+          "$ref": "#/$defs/period"
+        }
+      },
+      "additionalProperties": true,
+      "description": "Partial amount object or unknown. No fields are required. Missing unit/units defaults to currency; unit takes precedence. Numeric validity and comparability determine whether Share can be derived."
+    },
+    "observation": {
+      "type": "object",
+      "properties": {
+        "period": {
+          "$ref": "#/$defs/period"
+        },
+        "wallet": {
+          "$ref": "#/$defs/amount"
+        },
+        "capture": {
+          "$ref": "#/$defs/amount"
+        },
+        "service": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {},
+        "share": {
+          "description": "Legacy input accepted but removed on write; do not generate stored Share."
+        }
+      },
+      "additionalProperties": true
+    },
+    "client": {
+      "type": "object",
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "service": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "segment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/observation"
+          }
+        },
+        "momentum": {
+          "enum": [
+            "up",
+            "flat",
+            "down",
+            null
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/value"
+        },
+        "benefit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "coverage": {
+          "$ref": "#/$defs/terms"
+        },
+        "geography": {
+          "$ref": "#/$defs/terms"
+        },
+        "evidence": {},
+        "share": {
+          "description": "Legacy input accepted but removed on write; do not generate stored Share."
+        }
+      },
+      "additionalProperties": true,
+      "required": [
+        "client",
+        "service"
+      ]
+    },
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "section": {
+          "enum": [
+            "control",
+            "operate",
+            "source"
+          ]
+        },
+        "entity": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "type": {
+          "$ref": "#/$defs/nonblank",
+          "description": "Import accepts arbitrary nonblank types. Only the interactive editor restricts choices by section."
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entity_kind": {
+          "description": "Preserved extension metadata; no implemented entity-kind vocabulary or type restriction."
+        },
+        "evidence": {}
+      },
+      "additionalProperties": true,
+      "required": [
+        "section",
+        "entity",
+        "type"
+      ]
+    },
+    "company": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "clients": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/client"
+          }
+        },
+        "delivery": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/delivery"
+          }
+        },
+        "evidence": {}
+      },
+      "additionalProperties": true,
+      "required": [
+        "name"
+      ]
+    },
+    "normalizedJob": {
+      "type": "object",
+      "properties": {
+        "company_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "$ref": "#/$defs/terms"
+        },
+        "coverage": {
+          "$ref": "#/$defs/terms"
+        },
+        "geography": {
+          "$ref": "#/$defs/terms"
+        },
+        "client_segment": {
+          "$ref": "#/$defs/terms"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/value"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "company": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "role": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "when": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "deadline": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "company",
+        "role",
+        "when"
+      ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "action"
+            ]
+          },
+          {
+            "required": [
+              "Action"
+            ]
+          }
+        ]
+      },
+      "description": "Normalized version-1 job. The importer additionally checks timing syntax/calendar validity, deadlines, duplicate trimmed IDs, and filesystem names."
+    },
+    "canonicalJob": {
+      "type": "object",
+      "properties": {
+        "company_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "$ref": "#/$defs/terms"
+        },
+        "coverage": {
+          "$ref": "#/$defs/terms"
+        },
+        "geography": {
+          "$ref": "#/$defs/terms"
+        },
+        "client_segment": {
+          "$ref": "#/$defs/terms"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/value"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/value"
+              }
+            }
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "company": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "job": {
+          "$ref": "#/$defs/nonblank"
+        },
+        "deadline": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "portal": {
+          "type": "string"
+        },
+        "contact": {
+          "type": "string"
+        },
+        "brochure": {
+          "type": "string"
+        },
+        "description_text": {
+          "type": "string"
+        },
+        "form": {
+          "type": "string"
+        },
+        "resume": {
+          "type": "string"
+        },
+        "letter": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "apply": {
+          "type": "string"
+        },
+        "when": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "company",
+        "job"
+      ],
+      "description": "Canonical job. Remaining internal/legacy fields are preserved or normalized by ApplicationRecord. Action is not enumerated because canonical imports preserve legacy actions. Timing, deadlines, identity uniqueness and filesystem constraints are also checked by the application."
+    },
+    "job": {
+      "if": {
+        "required": [
+          "role"
+        ],
+        "not": {
+          "required": [
+            "job"
+          ]
+        }
+      },
+      "then": {
+        "$ref": "#/$defs/normalizedJob"
+      },
+      "else": {
+        "$ref": "#/$defs/canonicalJob"
+      }
+    }
+  }
+}

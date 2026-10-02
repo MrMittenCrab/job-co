@@ -4,12 +4,16 @@ import json
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
-from .documents import current_document_name, import_versioned_document, rename_managed_documents
+from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
 from .model import ApplicationRecord, sort_records
-from .naming import application_folder, application_stem
+from .importing import parse_import
+from .naming import application_stem, readable_folder_name
+from .timing import timing_precision
+from .company import company_union, merge_companies, merge_data, resolve, validate_companies
 
 
 class CareerStore:
@@ -31,26 +35,138 @@ class CareerStore:
                 return record
         raise KeyError(record_id)
 
+    def import_jobs(self, payload: object) -> tuple[int, int]:
+        if not isinstance(payload, dict):
+            raise ValueError('Expected a JSON object.')
+        if not {'jobs', 'applications', 'companies'} & payload.keys():
+            raise ValueError('Expected jobs or companies.')
+        if 'schema_version' in payload and (type(payload['schema_version']) is not int or payload['schema_version'] != 1):
+            raise ValueError('schema_version must be 1.')
+        if not isinstance(payload.get('jobs', []), list):
+            raise ValueError('jobs must be an array.')
+        companies = payload.get('companies', [])
+        validate_companies(companies)
+        canonical = 'schema_version' not in payload or any(isinstance(j, dict) and 'job' in j for j in payload.get('jobs', []))
+        if canonical:
+            raw = payload.get('jobs', payload.get('applications', []))
+            if not isinstance(raw, list):
+                raise ValueError('jobs must be an array.')
+            jobs = []
+            seen = set()
+            for item in raw:
+                if not isinstance(item, dict):
+                    raise ValueError('Each job must be an object.')
+                if not isinstance(item.get('id'), str) or not item['id'].strip():
+                    raise ValueError('Job id is required.')
+                if item['id'] in seen:
+                    raise ValueError('Duplicate job id.')
+                seen.add(item['id'])
+                if 'role' in item and 'job' not in item:
+                    data = parse_import({'schema_version': 1, 'jobs': [item]})[0]
+                else:
+                    if not all(isinstance(item.get(k), str) and item[k].strip() for k in ('company', 'job')):
+                        raise ValueError('Job company and job are required.')
+                    candidate = ApplicationRecord.from_dict(item)
+                    candidate.validate(preserve_action=True)
+                    cleaned = candidate.to_dict()
+                    data = {k: cleaned[k] for k in item if k in cleaned}
+                    for legacy, current in (('description', 'brochure'), ('apply', 'portal')):
+                        if legacy in item and current not in item:
+                            data[current] = cleaned[current]
+                    data['when'] = candidate.when
+                    data['import_id'] = candidate.import_id or candidate.id
+                jobs.append(data)
+        else:
+            jobs = parse_import({k: v for k, v in payload.items() if k != 'companies'})
+        existing = {key: record for record in self._load(preserve_actions=True)
+                    for key in (record.id, record.import_id) if key}
+        created = updated = 0
+        for data in jobs:
+            old = existing.get(data['import_id'])
+            if old is None:
+                new_data = dict(data)
+                new_data.setdefault('id', uuid.uuid4().hex)
+                new_data.setdefault('action', 'Check')
+                record = ApplicationRecord.from_dict(new_data)
+                self.add(record,
+                         _preserve_existing_actions=True)
+                existing[record.import_id] = record
+                created += 1
+            else:
+                # Imports may refine timing, but must not erase a known date.
+                if old.deadline and not data.get('deadline'):
+                    data.pop('deadline', None)
+                if timing_precision(old.when) > timing_precision(data['when']):
+                    data.pop('when')
+                previous = old.to_dict()
+                data = {k: merge_data({k: previous[k]}, {k: v})[k]
+                        if k in previous and isinstance(v, (dict, list)) else v
+                        for k, v in data.items()}
+                self.update(old.id, data, _preserve_existing_actions=True)
+                updated += 1
+        document = self._document()
+        document['companies'] = merge_companies(document.get('companies', []), companies)
+        for key, value in payload.items():
+            if key not in {'jobs', 'applications', 'companies', 'schema_version', 'version'}:
+                document[key] = merge_data({key: document[key]}, {key: value})[key] if key in document else value
+        self._write(document)
+        return created, updated
+
+    def _folder(self, record: ApplicationRecord) -> Path:
+        if record.folder_name:
+            if Path(record.folder_name).name != record.folder_name or record.folder_name in {'.', '..'}:
+                raise ValueError('Invalid stored application folder name.')
+            return self.applications_dir / record.folder_name
+        return self.applications_dir / readable_folder_name(record.company, record.job)
+
+    def _allocate_folder(self, record: ApplicationRecord, records: list[ApplicationRecord],
+                         *, current: Path | None = None) -> str:
+        base = readable_folder_name(record.company, record.job)
+        full = readable_folder_name(record.company, record.job, short=False)
+        if any(other.id != record.id
+               and readable_folder_name(other.company, other.job).casefold() == base.casefold()
+               and readable_folder_name(other.company, other.job, short=False).casefold() != full.casefold()
+               for other in records):
+            base = full
+        occupied = {path.name.casefold() for path in self.applications_dir.iterdir()
+                    if path != current}
+        occupied.update(other.folder_name.casefold() for other in records
+                        if other.id != record.id and other.folder_name)
+        name, index = base, 2
+        while name.casefold() in occupied:
+            name = f'{base} ({index})'
+            index += 1
+        return name
+
     def add(
         self,
         record: ApplicationRecord,
         *,
         resume_source: Path | None = None,
         letter_source: Path | None = None,
+        brochure_source: Path | None = None,
+        form_source: Path | None = None,
+        _preserve_existing_actions: bool = False,
     ) -> ApplicationRecord:
-        record.validate()
-        records = self._load()
-        self._assert_unique_stem(records, record, ignore_id=None)
-        folder = application_folder(self.applications_dir, record.company, record.job)
+        record.validate(preserve_action=_preserve_existing_actions)
+        records = self._load(preserve_actions=_preserve_existing_actions)
+        if any(other.id == record.id for other in records):
+            raise ValueError('An application with this ID already exists.')
+        record.folder_name = self._allocate_folder(record, records)
+        folder = self._folder(record)
         if folder.exists() and any(folder.iterdir()):
-            raise ValueError("An application folder for this Company and Job already exists.")
+            raise ValueError("An application folder for this Company and Program already exists.")
         folder.mkdir(parents=True, exist_ok=True)
         stem = application_stem(record.company, record.job)
         try:
-            if resume_source:
-                record.resume = import_versioned_document(Path(resume_source), folder, stem, "Resume")
-            if letter_source:
-                record.letter = import_versioned_document(Path(letter_source), folder, stem, "Letter")
+            for attr, kind, source in (
+                ("resume", "Resume", resume_source),
+                ("letter", "Letter", letter_source),
+                ("brochure", "Brochure", brochure_source),
+                ("form", "Form", form_source),
+            ):
+                if source:
+                    setattr(record, attr, import_versioned_document(Path(source), folder, stem, kind))
             records.append(record)
             self._save(records)
         except Exception:
@@ -66,44 +182,62 @@ class CareerStore:
         *,
         resume_source: Path | None = None,
         letter_source: Path | None = None,
+        brochure_source: Path | None = None,
+        form_source: Path | None = None,
+        _preserve_existing_actions: bool = False,
     ) -> ApplicationRecord:
-        records = self._load()
+        records = self._load(preserve_actions=_preserve_existing_actions)
         index = next((i for i, record in enumerate(records) if record.id == record_id), None)
         if index is None:
             raise KeyError(record_id)
 
         old = records[index]
         data = old.to_dict()
+        file_fields = {"resume", "letter", "brochure", "form"}
         for key, value in changes.items():
-            if key in data and key not in {"id", "resume", "letter"}:
+            if key not in {"id", "folder_name", *file_fields}:
                 data[key] = value
         updated = ApplicationRecord.from_dict(data)
-        updated.validate()
-        self._assert_unique_stem(records, updated, ignore_id=record_id)
+        if _preserve_existing_actions:
+            # Import fields cannot change or normalize an existing Action.
+            updated.action = old.action
+        updated.validate(preserve_action=_preserve_existing_actions)
 
         old_stem = application_stem(old.company, old.job)
         new_stem = application_stem(updated.company, updated.job)
-        old_folder = self.applications_dir / old_stem
-        new_folder = self.applications_dir / new_stem
+        old_folder = self._folder(old)
+        if (old.company, old.job) != (updated.company, updated.job):
+            updated.folder_name = self._allocate_folder(updated, records, current=old_folder)
+        new_folder = self._folder(updated)
 
-        if old_stem != new_stem:
+        if old_folder != new_folder:
             if new_folder.exists():
-                raise ValueError("An application folder for this Company and Job already exists.")
+                raise ValueError("An application folder for this Company and Program already exists.")
             if old_folder.exists():
                 old_folder.rename(new_folder)
             else:
                 new_folder.mkdir(parents=True, exist_ok=True)
-            rename_managed_documents(new_folder, old_stem, new_stem)
         else:
             new_folder.mkdir(parents=True, exist_ok=True)
 
-        updated.resume = current_document_name(new_folder, new_stem, "Resume")
-        updated.letter = current_document_name(new_folder, new_stem, "Letter")
+        rename_managed_documents(new_folder, old_stem, new_stem)
 
-        if resume_source:
-            updated.resume = import_versioned_document(Path(resume_source), new_folder, new_stem, "Resume")
-        if letter_source:
-            updated.letter = import_versioned_document(Path(letter_source), new_folder, new_stem, "Letter")
+        for attr, kind in (
+            ("resume", "Resume"),
+            ("letter", "Letter"),
+            ("brochure", "Brochure"),
+            ("form", "Form"),
+        ):
+            setattr(updated, attr, current_document_name(new_folder, new_stem, kind))
+
+        for attr, kind, source in (
+            ("resume", "Resume", resume_source),
+            ("letter", "Letter", letter_source),
+            ("brochure", "Brochure", brochure_source),
+            ("form", "Form", form_source),
+        ):
+            if source:
+                setattr(updated, attr, import_versioned_document(Path(source), new_folder, new_stem, kind))
 
         records[index] = updated
         self._save(records)
@@ -114,39 +248,109 @@ class CareerStore:
         record = next((record for record in records if record.id == record_id), None)
         if record is None:
             raise KeyError(record_id)
-        folder = application_folder(self.applications_dir, record.company, record.job)
+        folder = self._folder(record)
         if folder.exists():
             shutil.rmtree(folder)
         self._save([item for item in records if item.id != record_id])
 
-    def _assert_unique_stem(
-        self,
-        records: list[ApplicationRecord],
-        candidate: ApplicationRecord,
-        *,
-        ignore_id: str | None,
-    ) -> None:
-        candidate_stem = application_stem(candidate.company, candidate.job).casefold()
-        for record in records:
-            if ignore_id is not None and record.id == ignore_id:
-                continue
-            if application_stem(record.company, record.job).casefold() == candidate_stem:
-                raise ValueError("An application for this Company and Job already exists.")
-
-    def _load(self) -> list[ApplicationRecord]:
+    def _load(self, *, preserve_actions: bool = False) -> list[ApplicationRecord]:
         try:
             payload = json.loads(self.metadata_path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return []
-        applications = payload.get("applications", [])
-        return [ApplicationRecord.from_dict(item) for item in applications]
+        applications = payload.get("jobs", payload.get("applications", []))
+        records = [ApplicationRecord.from_dict(item) for item in applications]
+        if preserve_actions:
+            # Restore before any migration save, including unrelated records.
+            for record, item in zip(records, applications):
+                if 'action' in item:
+                    record.action = item['action']
+        self._migrate_folders(records)
+        migrated = False
+        for record, item in zip(records, applications):
+            if "description" in item:
+                record.brochure = migrate_brochure(
+                    self._folder(record), application_stem(record.company, record.job), record.brochure)
+                migrated = True
+        if 'jobs' not in payload or migrated or any(not item.get('deadline') and not item.get('when') for item in applications):
+            self._save(records)
+        return records
+
+    def _migrate_folders(self, records: list[ApplicationRecord]) -> bool:
+        moves: list[tuple[Path, Path]] = []
+        changed = False
+        try:
+            for record in records:
+                if record.folder_name:
+                    continue
+                stem = application_stem(record.company, record.job)
+                legacy = self.applications_dir / (stem + ('__' + record.id if record.import_id else ''))
+                record.folder_name = self._allocate_folder(record, records)
+                destination = self._folder(record)
+                if legacy.exists():
+                    legacy.rename(destination)
+                    moves.append((legacy, destination))
+                # Older metadata normally stores basenames. Also repair absolute
+                # or root-relative managed paths when present.
+                for attr in ('resume', 'letter', 'brochure', 'form'):
+                    value = getattr(record, attr)
+                    for old in (str(legacy), str(legacy.relative_to(self.root))):
+                        if value.startswith(old + '/'):
+                            setattr(record, attr, value[len(old) + 1:])
+                            break
+                changed = True
+            if changed:
+                self._save(records)
+        except Exception:
+            for old, new in reversed(moves):
+                new.rename(old)
+            raise
+        return changed
 
     def _save(self, records: list[ApplicationRecord]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "version": 1,
-            "applications": [record.to_dict() for record in records],
-        }
+        payload = self._document()
+        payload.update(version=8, jobs=[record.to_dict() for record in records])
+        payload.pop('applications', None)
+        payload.setdefault('companies', [])
+        self._write(payload)
+
+    def _document(self) -> dict:
+        try:
+            return json.loads(self.metadata_path.read_text(encoding='utf-8'))
+        except FileNotFoundError:
+            return {}
+
+    def companies(self) -> list[dict]:
+        jobs = self.list()
+        return company_union(self._document().get('companies', []), jobs)
+
+    def save_company(self, company: dict) -> None:
+        validate_companies([company])
+        payload = self._document()
+        companies = payload.setdefault('companies', [])
+        found = resolve(companies, company.get('id'), company.get('name'))
+        index = companies.index(found) if found is not None else None
+        if index is None:
+            companies.append(company)
+        else:
+            companies[index] = company
+        self._write(payload)
+
+    def export_data(self) -> dict:
+        self.list()  # Complete legacy migrations before taking a snapshot.
+        payload = self._document()
+        payload['jobs'] = payload.get('jobs', payload.get('applications', []))
+        payload.pop('applications', None)
+        payload.setdefault('companies', [])
+        return payload
+
+    def _write(self, payload: dict) -> None:
+        for company in payload.get('companies', []):
+            for client in company.get('clients', []):
+                client.pop('share', None)
+                for observation in client.get('observations', []):
+                    observation.pop('share', None)
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         fd, temp_name = tempfile.mkstemp(prefix=".applications.", suffix=".tmp", dir=self.root)
         try:

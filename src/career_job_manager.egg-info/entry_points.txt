@@ -1,2 +1,3 @@
 [console_scripts]
+company = career_job_manager.cli:company_main
 job = career_job_manager.cli:main
