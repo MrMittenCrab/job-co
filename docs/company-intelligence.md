@@ -38,9 +38,17 @@ imports are discarded by the same rule.
 
 HOME has only Company and Departments. Departments is derived from STRATEGY,
 ordered by descending Revenue and joined with ` · `; an empty summary is `-`.
-Companies with populated Departments sort first; those with `-` sort second.
-Each group sorts alphabetically by case-insensitive company name, without a
-completeness score. All stored companies appear on HOME, including companies
+Edited company profiles sort first; unedited JOB-employer placeholders sort second.
+Each group sorts by normalized company name (Unicode NFKC, case folding and word
+normalization), then ID. The persistent boolean `profile_edited` is set by explicit
+company imports and successful manual saves, including identity-only edits and
+profiles with empty tables. An exported `false` marker survives reimport; merging
+identities never clears a `true` marker. Legacy records recover this status from
+substantive table/profile data, evidence, research notes, ownership or aliases,
+before obsolete data is discarded. Name-only records without such evidence remain
+unedited; unknown historical activity is not inferred from dates or empty tables.
+Departments, Revenue and modification dates do not determine HOME ordering.
+All stored companies appear on HOME, including companies
 without jobs; search and identity resolution remain unchanged. Returning from any company table restores the same company by ID
 as the first visible row, retaining the search filter.
 

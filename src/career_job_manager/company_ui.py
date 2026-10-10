@@ -154,9 +154,8 @@ class CompanyScreen(Screen):
     def reload(self):
         if self.view == 'company':
             companies = self.store.companies()
-            self.rows = sorted(
-                (c for c in companies if self.query_text in normalize(' '.join([c['name'], *c.get('aliases', [])]))),
-                key=lambda c: (c['name'].casefold(), c['id']))
+            self.rows = [c for c in companies
+                         if self.query_text in normalize(' '.join([c['name'], *c.get('aliases', [])]))]
         else:
             if self.blank_row is None:
                 self.blank_row = {column.lower(): '-' for column in self.headers}

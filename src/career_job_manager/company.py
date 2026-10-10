@@ -64,6 +64,18 @@ def merge_data(old, new):
 def migrate_company(company, *, fill=True):
     """Discard obsolete intelligence, retaining identity and unrelated metadata."""
     result = deepcopy(company)
+    if 'profile_edited' not in result:
+        # Recover profile/identity work before obsolete intelligence is discarded.
+        # Empty tables and dates alone say nothing about historical edits.
+        def substantive(value):
+            if isinstance(value, dict):
+                return any(substantive(v) for k, v in value.items() if k != 'id')
+            if isinstance(value, list):
+                return any(substantive(v) for v in value)
+            return value is not None and cell(value) != '-'
+        result['profile_edited'] = any(substantive(result.get(key)) for key in (
+            *TABLES, 'composition', 'value', 'delivery', 'aliases', 'evidence',
+            'research_profile', 'research_notes', 'ownership_bucket'))
     if 'composition' in result:
         result.setdefault('makeup', []).extend(result.pop('composition'))
     for row in result.get('strategy', []):
@@ -106,6 +118,7 @@ def merge_companies(old, incoming):
             result.append(migrate_company(found))
             continue
         merged = merge_data(found, {k: v for k, v in item.items() if k not in (*TABLES, 'id')})
+        merged['profile_edited'] = found['profile_edited'] or item['profile_edited']
         if normalize(found['name']) != normalize(merged['name']):
             merged['aliases'] = list(dict.fromkeys([*merged.get('aliases', []), found['name']]))
         for table, columns in TABLES.items():
@@ -133,7 +146,11 @@ def company_union(companies, jobs):
             result.append(migrate_company({
                 'id': job.company_id or uuid.uuid5(uuid.NAMESPACE_URL, 'company:' + normalize(job.company)).hex,
                 'name': job.company, 'aliases': []}))
-    return sorted(result, key=lambda c: (normalize(c['name']), c['id']))
+    return sorted(result, key=company_home_key)
+
+
+def company_home_key(company):
+    return (not company['profile_edited'], normalize(company['name']), company['id'])
 
 
 def validate_companies(companies):
@@ -144,6 +161,8 @@ def validate_companies(companies):
             raise ValueError('Company name is required.')
         if company.get('id') is not None and not isinstance(company['id'], str):
             raise ValueError('Company id must be a string.')
+        if 'profile_edited' in company and type(company['profile_edited']) is not bool:
+            raise ValueError('profile_edited must be a boolean.')
         if not isinstance(company.get('aliases', []), list) or any(not isinstance(a, str) for a in company.get('aliases', [])):
             raise ValueError('aliases must be strings.')
         for table, columns in {**TABLES, 'composition': TABLES['makeup']}.items():

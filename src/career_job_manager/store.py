@@ -119,6 +119,9 @@ class CareerStore:
                 updated += merged.to_dict() != previous
         document = self._document()
         previous_companies = {c['id']: c for c in merge_companies([], document.get('companies', []))}
+        # Explicit profiles count even with empty tables. Exported placeholders
+        # retain their marker; identity merges can never clear an edited status.
+        companies = [dict(c, profile_edited=c.get('profile_edited', True)) for c in companies]
         document['companies'] = merge_companies(document.get('companies', []), companies)
         for key, value in payload.items():
             if key not in {'jobs', 'applications', 'companies', 'schema_version', 'version'}:
@@ -346,6 +349,7 @@ class CareerStore:
 
     def save_company(self, company: dict) -> None:
         validate_companies([company])
+        company = dict(company, profile_edited=True)
         payload = self._document()
         companies = payload.setdefault('companies', [])
         found = resolve(companies, company.get('id'), company.get('name'))

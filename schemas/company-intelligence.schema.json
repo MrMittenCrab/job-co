@@ -154,6 +154,10 @@
         "name"
       ],
       "properties": {
+        "profile_edited": {
+          "type": "boolean",
+          "description": "Persistent company-profile edit/import status. Omitted on explicit imports defaults to true; exported false preserves placeholders."
+        },
         "id": {
           "type": "string"
         },
