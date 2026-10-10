@@ -52,8 +52,9 @@ new code; future imports refresh automatically.
 ## Keyboard and layout
 
 `q` quits outside text editing; it remains ordinary text in search, JOB fields,
-company cells and identity fields. Escape never quits. Left in an active search
-clears it and returns focus to the list in both interfaces. Enter retains the
+company cells and identity fields. Escape never quits. Left at the beginning of an active search (including empty input)
+clears it and returns focus to the list in both interfaces. Elsewhere Left moves
+the cursor normally; a selection collapses without exiting. Enter retains the
 existing behavior of ending search editing while keeping the filter; established
 Left/back navigation after Enter is preserved.
 
@@ -81,3 +82,11 @@ all three CPIC jobs, all three Hong Kong companies and their identity links.
 The live database remains byte-for-byte unchanged, with SHA-256
 `c8c20ef2f3f0a600a539b72b973e8806a247fcc9d232c31839bd9be074f0055c`.
 All 13 attachment files match the backup hash manifest.
+
+### Search-navigation correction
+
+Left now backs out only at cursor position zero with no active selection,
+including an empty query. Within text it moves normally; with text selected it
+collapses the selection without exiting. Verified in both JOB and COMPANY:
+21 focused tests and the complete suite of 466 tests passed. The database
+remained unchanged.

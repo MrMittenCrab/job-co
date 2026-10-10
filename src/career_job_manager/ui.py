@@ -68,7 +68,9 @@ class SearchInput(Input):
             screen.move_search_cursor(1)
             event.prevent_default()
             event.stop()
-        elif event.key in {"left", "escape"} and hasattr(screen, "clear_search"):
+        elif (event.key == "escape" or (
+            event.key == "left" and self.cursor_position == 0 and self.selection.is_empty
+        )) and hasattr(screen, "clear_search"):
             screen.clear_search()
             event.prevent_default()
             event.stop()

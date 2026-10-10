@@ -45,7 +45,7 @@ def test_left_clears_search_and_q_is_text_until_search_exits(tmp_path, root):
             search = screen.query_one(SearchInput)
             assert search.value == 'q'
             assert app.is_running
-            await pilot.press('left')
+            await pilot.press('home', 'left')
             assert search.value == ''
             assert not search.has_focus
             assert len(screen.rows if root == 'company' else screen.visible_records) == 1

@@ -78,7 +78,7 @@ a        add
 /        search Company / Job / Action / Contact
 d        delete
 q        quit (outside text editing)
-Left     exit search and clear its filter
+Left     at search beginning: clear filter and return home; otherwise move cursor
 Esc      clear search; never quit
 ```
 
@@ -203,7 +203,9 @@ Revenue/Period ordering, migration, and import behavior.
 Both home lists check `applications.json` for changes once per second. External
 imports become visible without re-importing or restarting the corrected app.
 Selection and search text are retained; a filter may still exclude new rows.
-Left in either search clears the filter and restores normal list navigation.
+Left at the beginning of either search (including empty input) clears the filter
+and restores normal list navigation. Elsewhere it moves the cursor normally;
+with text selected it collapses the selection without exiting.
 Detail editors are not replaced while editing; return to the list to see imports.
 
 Imported Check jobs follow other actions. COMPANY keeps companies with STRATEGY
