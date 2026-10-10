@@ -125,6 +125,7 @@ class CompanyScreen(Screen):
     DEFAULT_CSS = '''
     CompanyScreen #company-title { height: 2; padding: 0 1; }
     CompanyScreen #company-scroll { height: 1fr; padding: 0 1; scrollbar-size: 1 1; }
+    CompanyScreen #company-scroll.company-home { scrollbar-size-vertical: 0; }
     CompanyHeader { height: 1; padding: 0 1; }
     CompanyTable { height: auto; min-height: 1; }
     CompanyScreen #company-help { height: 2; padding: 0 1; }
@@ -155,7 +156,7 @@ class CompanyScreen(Screen):
             companies = self.store.companies()
             self.rows = sorted(
                 (c for c in companies if self.query_text in normalize(' '.join([c['name'], *c.get('aliases', [])]))),
-                key=lambda c: (departments(c) == '-', c['name'].casefold(), c['id']))
+                key=lambda c: (c['name'].casefold(), c['id']))
         else:
             if self.blank_row is None:
                 self.blank_row = {column.lower(): '-' for column in self.headers}
@@ -236,6 +237,7 @@ class CompanyScreen(Screen):
         return rendered
 
     def redraw(self):
+        self.query_one('#company-scroll').set_class(self.view == 'company', 'company-home')
         header = self.query_one(CompanyHeader)
         header.display = True
         header.refresh()

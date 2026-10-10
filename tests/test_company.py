@@ -137,7 +137,7 @@ def test_composition_migration_preserves_rows_and_is_idempotent(tmp_path, existi
     assert imported.export_data()['companies'][0]['makeup'] == migrated['companies'][0]['makeup']
 
 
-def test_home_groups_only_by_strategy_departments(tmp_path):
+def test_home_alphabetical_order_preserves_departments(tmp_path):
     async def scenario():
         companies = [
             {'id': 'z', 'name': 'Zulu', 'strategy': [{'department': 'One'}, {'department': 'Two'}]},
@@ -154,8 +154,8 @@ def test_home_groups_only_by_strategy_departments(tmp_path):
         app = CareerApp(store, initial_root='company')
         async with app.run_test() as pilot:
             screen = app.screen
-            assert [r['name'] for r in screen.rows] == ['beta', 'Zulu', 'Alpha', 'Charlie', 'delta', 'Echo']
-            assert [screen.values(r)[1] for r in screen.rows] == ['One', 'One · Two', '-', '-', '-', '-']
+            assert [r['name'] for r in screen.rows] == ['Alpha', 'beta', 'Charlie', 'delta', 'Echo', 'Zulu']
+            assert [screen.values(r)[1] for r in screen.rows] == ['-', 'One', '-', '-', '-', 'One · Two']
             await pilot.press('n')
             assert screen.view == 'company'
     asyncio.run(scenario())

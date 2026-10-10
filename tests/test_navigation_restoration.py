@@ -168,7 +168,7 @@ def assert_company_at_top(app, screen):
 
 @pytest.mark.parametrize('key', ['right', 'd'])
 @pytest.mark.parametrize('query', ['', 'Target'])
-def test_company_return_last_row_after_population_resort(tmp_path, key, query):
+def test_company_return_last_row_after_department_update(tmp_path, key, query):
     async def scenario():
         store = CareerStore(tmp_path)
         store.import_jobs({'jobs': [
@@ -189,9 +189,13 @@ def test_company_return_last_row_after_population_resort(tmp_path, key, query):
             await pilot.press('escape')
             await pilot.pause()
             assert screen.selected()['id'] == '34'
-            assert screen.index == 0
+            assert screen.index == 34
             assert screen.query_one(SearchInput).value == query
             assert_company_at_top(app, screen)
+            position = screen.query_one('#company-scroll').scroll_y
             await pilot.press('down', 'down')
-            assert screen.query_one('#company-scroll').scroll_y == 0
+            assert screen.selected()['id'] == '34'
+            assert screen.query_one('#company-scroll').scroll_y == position
+            await pilot.press('up')
+            assert screen.selected()['id'] == '33'
     asyncio.run(scenario())
