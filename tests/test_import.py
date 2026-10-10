@@ -39,9 +39,9 @@ def test_import_preserves_existing_actions_verbatim_on_create_update_and_repeat(
     matched = opportunity(id='company-a', company='Company A Updated')
 
     for jobs, counts in [(payload(new), (1, 0)),
-                         (payload(matched, new), (0, 2)),
-                         (payload(matched, new), (0, 2))]:
-        assert store.import_jobs(jobs) == counts
+                         (payload(matched, new), (0, 1)),
+                         (payload(matched, new), (0, 0))]:
+        assert store.import_jobs(jobs).jobs == counts
         saved = json.loads(store.metadata_path.read_text())['jobs']
         assert {record['company']: record['action'] for record in saved} == {
             'CPIC': action,
@@ -54,7 +54,7 @@ def test_import_create_update_preserve_action_and_coexist(tmp_path):
     store = CareerStore(tmp_path)
     store.add(ApplicationRecord(id='manual', company='Manual', job='Analyst'))
     job = opportunity(url='https://example.com', description='Full description\nSecond line')
-    assert store.import_jobs(payload(job)) == (1, 0)
+    assert store.import_jobs(payload(job)).jobs == (1, 0)
     imported = next(r for r in store.list() if r.import_id == job['id'])
     assert (imported.action, imported.portal, imported.description_text) == (
         'Check', 'https://example.com', 'Full description\nSecond line')
@@ -63,14 +63,14 @@ def test_import_create_update_preserve_action_and_coexist(tmp_path):
     store.update(imported.id, {'action': 'Email', 'contact': 'Jane'})
     changed = opportunity(company='HSBC HK', role='Markets Analyst', when='2026-11',
                           deadline='2026-11-30', url='https://new.example', description='Updated')
-    assert store.import_jobs(payload(changed)) == (0, 1)
-    assert store.import_jobs(payload(changed)) == (0, 1)
+    assert store.import_jobs(payload(changed)).jobs == (0, 1)
+    assert store.import_jobs(payload(changed)).jobs == (0, 0)
     saved = store.get(imported.id)
     assert (saved.company, saved.job, saved.when, saved.deadline) == (
         'HSBC HK', 'Markets Analyst', '2026-11', '2026-11-30')
     assert (saved.action, saved.contact, saved.portal, saved.description_text) == (
         'Email', 'Jane', 'https://new.example', 'Updated')
-    assert store.import_jobs(payload(opportunity(id='another', company='Other'))) == (1, 0)
+    assert store.import_jobs(payload(opportunity(id='another', company='Other'))).jobs == (1, 0)
     assert len(store.list()) == 3
     assert store.get('manual').action == 'Apply'
     assert store.get(imported.id).action == 'Email'
@@ -197,7 +197,7 @@ def test_import_cli_does_not_launch_ui(tmp_path, monkeypatch, capsys):
     cli.main(['import', str(path)])
     assert '1 created' in capsys.readouterr().out
     cli.main(['import', str(path)])
-    assert '1 updated' in capsys.readouterr().out
+    assert 'Jobs: 0 created, 0 updated.' in capsys.readouterr().out
     assert len(CareerStore().list()) == 1
     path.write_text('{invalid')
     with pytest.raises(SystemExit) as exc:

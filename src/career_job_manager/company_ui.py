@@ -9,14 +9,16 @@ from textual.geometry import Region
 from textual.screen import Screen
 from textual.widgets import Input, Static
 
-from .company import (SECTIONS, TYPES, VALUES, aggregate, display_delta, display_share,
-                      latest, money, momentum, normalize, relevance, share)
+from .company import (TABLES, TABLE_KEYS, SEPARATOR, cell, departments,
+                      normalize, ordered_rows, resolve)
 from .editing import InlineBuffer, normalize_pasted_text
-from .ui import ConfirmDelete, HomeScreen, SearchInput
+from .ui import ApplicationList, HomeScreen, SearchInput, watch_store
 
 
 def widths_for(headers, rows, width):
-    widths = [max(Text(str(r[i])).cell_len for r in [headers, *rows]) for i in range(len(headers))]
+    limit = 48 if len(headers) == 2 else 32
+    widths = [min(limit, max(12, max(Text(str(r[i])).cell_len for r in [headers, *rows])))
+              for i in range(len(headers))]
     available = max(len(headers), width - 2 - 2 * (len(headers) - 1))
     while sum(widths) > available:
         index = max(range(len(widths)), key=lambda i: (widths[i], -i))
@@ -26,14 +28,24 @@ def widths_for(headers, rows, width):
     return widths
 
 
-def table_row(values, widths, console, *, selected=False, expand=False, active=None):
+def table_row(values, widths, console, *, selected=False, expand=False, selected_column=None):
     cells = []
     for value, width in zip(values, widths):
         text = Text(' '.join(str(value).splitlines()).replace('\t', ' '))
         if expand:
             cells.append(list(text.wrap(console, width, overflow='fold')) or [Text('')])
         else:
-            text.truncate(width, overflow='ellipsis')
+            if text.cell_len > width:
+                complete = ''
+                for phrase in text.plain.split(SEPARATOR):
+                    candidate = complete + (SEPARATOR if complete else '') + phrase
+                    if Text(candidate + SEPARATOR + '…').cell_len > width:
+                        break
+                    complete = candidate
+                if complete:
+                    text = Text(complete + SEPARATOR + '…')
+                else:
+                    text.truncate(width, overflow='ellipsis')
             cells.append([text])
     result = Text(no_wrap=True, overflow='crop')
     for line in range(max(map(len, cells))):
@@ -43,12 +55,23 @@ def table_row(values, widths, console, *, selected=False, expand=False, active=N
         for index, (cell, width) in enumerate(zip(cells, widths)):
             part = cell[line].copy() if line < len(cell) else Text('')
             part.pad_right(width - part.cell_len)
-            if active == index:
-                part.stylize('underline')
+            if selected and index == selected_column:
+                part.stylize("reverse")
             result.append(part)
             if index < len(widths) - 1:
                 result.append('  ')
     return result
+
+
+COMPANY_HEADERS = ('Company', 'Departments')
+
+
+class CompanyHeader(Static):
+    def render(self):
+        screen = self.screen
+        width = screen.query_one(CompanyTable).content_size.width or 80
+        widths = widths_for(screen.headers, [screen.values(r) for r in screen.rows], width)
+        return table_row(screen.headers, widths, self.app.console)
 
 
 class CompanyTable(Static):
@@ -59,6 +82,7 @@ class CompanyTable(Static):
 
     def on_resize(self):
         self.refresh(layout=True)
+        self.screen.query_one(CompanyHeader).refresh()
         self.screen.call_after_refresh(self.screen.reveal_selection)
 
     def on_mouse_down(self, event):
@@ -66,10 +90,42 @@ class CompanyTable(Static):
         event.stop()
 
 
+class CompanyJobsScreen(HomeScreen):
+    """Use job HOME with an initial, editable identity-aware company search."""
+
+    def __init__(self, store, company):
+        super().__init__(store)
+        self.company = company
+        self.initial_search = company['name']
+        self.identity_search = True
+
+    def on_mount(self):
+        self.query_one(SearchInput).value = self.initial_search
+        super().on_mount()
+
+    def refresh_list(self):
+        query = self.query_one(SearchInput).value
+        if query != self.initial_search:
+            self.identity_search = False
+        if not self.identity_search:
+            super().refresh_list()
+            return
+        companies = self.store.companies()
+        self.visible_records = [record for record in self.store.list()
+                                if (resolve(companies, record.company_id, record.company) or {}).get('id')
+                                == self.company['id']]
+        self.query_one(ApplicationList).set_records(self.visible_records)
+
+    def action_back_context(self):
+        if not self.query_one(SearchInput).has_focus:
+            self.app.pop_screen()
+
+
 class CompanyScreen(Screen):
     DEFAULT_CSS = '''
     CompanyScreen #company-title { height: 2; padding: 0 1; }
     CompanyScreen #company-scroll { height: 1fr; padding: 0 1; scrollbar-size: 1 1; }
+    CompanyHeader { height: 1; padding: 0 1; }
     CompanyTable { height: auto; min-height: 1; }
     CompanyScreen #company-help { height: 2; padding: 0 1; }
     '''
@@ -81,36 +137,34 @@ class CompanyScreen(Screen):
         self.view = view
         self.job_context = job_context
         self.index = 0
+        self.company_index = 0
+        self.align_company_top = False
+        self.selected_company_id = company.get('id') if company else None
         self.expanded = set()
-        self.field = None
+        self.field = None if view == 'company' else 0
         self.editor = None
-        self.options = ()
-        self.option_index = 0
-        self.draft = None
         self.selected_line = 0
         self.focus_line = 0
         self.rows = []
+        self.blank_row = None
         self.query_text = ''
         self.reload()
 
     def reload(self):
         if self.view == 'company':
-            self.rows = [c for c in self.store.companies() if self.query_text in normalize(' '.join([c['name'], *c.get('aliases', [])]))]
-        elif self.view == 'value':
-            self.rows = list(self.company.get('clients', []))
-            if self.job_context:
-                self.rows.sort(key=lambda r: relevance(self.job_context, r))
+            companies = self.store.companies()
+            self.rows = sorted(
+                (c for c in companies if self.query_text in normalize(' '.join([c['name'], *c.get('aliases', [])]))),
+                key=lambda c: (departments(c) == '-', c['name'].casefold(), c['id']))
         else:
-            self.rows = []
-            for section in SECTIONS:
-                section_rows = [r for r in self.company.get('delivery', []) if r.get('section') == section]
-                if self.draft and self.draft['section'] == section:
-                    section_rows.append(self.draft)
-                self.rows.extend(section_rows or [{'section': section, '_empty': True}])
+            if self.blank_row is None:
+                self.blank_row = {column.lower(): '-' for column in self.headers}
+            self.rows = [*ordered_rows(self.company, self.view), self.blank_row]
         self.index = max(0, min(self.index, len(self.rows) - 1))
 
     def compose(self):
         yield Static(self.heading(), id='company-title', markup=False)
+        yield CompanyHeader(id='company-header')
         with VerticalScroll(id='company-scroll'):
             yield CompanyTable(id='company-table')
         yield SearchInput(placeholder='Search', id='search')
@@ -123,24 +177,33 @@ class CompanyScreen(Screen):
         self.query_one('#search').display = False
         self.query_one(CompanyTable).focus()
         self.redraw()
+        watch_store(self, self.refresh_external)
+
+    def refresh_external(self):
+        if self.view != 'company' or self.editor is not None:
+            return False
+        selected = self.selected()
+        self.reload()
+        if selected:
+            self.index = next((i for i, row in enumerate(self.rows)
+                               if row['id'] == selected['id']), self.index)
+        self.redraw()
+        return True
 
     def selected(self):
         return self.rows[self.index] if self.rows else None
 
+    @property
+    def headers(self):
+        return COMPANY_HEADERS if self.view == 'company' else TABLES[self.view]
+
     def values(self, row):
         if self.view == 'company':
-            return (row['name'], *aggregate(row))
-        if self.view == 'value':
-            o = latest(row)
-            return (row.get('client') or '-', row.get('segment') or '-', row.get('service') or '-',
-                    money(o.get('wallet')), money(o.get('capture')), display_share(share(row)),
-                    display_delta(momentum(row)), row.get('value') if row.get('value') in VALUES else '-')
-        return tuple(str(row.get(k) or '-') for k in ('entity', 'type', 'detail'))
+            return (cell(row['name']), departments(row))
+        return tuple(cell(row.get(column.lower())) for column in self.headers)
 
     def render_table(self, width):
-        headers = {'company': ('COMPANY', 'CLIENTS', 'SEGMENTS', 'SHARE', 'Δ', 'VALUE'),
-                   'value': ('CLIENT', 'SEGMENT', 'SERVICE', 'WALLET', 'CAPTURE', 'SHARE', 'Δ', 'VALUE'),
-                   'delivery': ('ENTITY', 'TYPE', 'DETAIL')}[self.view]
+        headers = self.headers
         values = [self.values(r) for r in self.rows]
         widths = widths_for(headers, values, width)
         rendered = Text(no_wrap=True, overflow='crop')
@@ -150,44 +213,38 @@ class CompanyScreen(Screen):
                 rendered.append('\n')
             rendered.append(text)
 
-        if self.view != 'delivery':
-            append(table_row(headers, widths, self.app.console))
-        section = None
         for i, row in enumerate(self.rows):
-            if self.view == 'delivery' and section != row['section']:
-                section = row['section']
-                append(Text(('\n' if rendered else '') + section.upper() + '\n'))
-                append(table_row(headers, widths, self.app.console))
             selected = i == self.index
             if selected:
-                self.selected_line = rendered.plain.count('\n') + 1
+                self.selected_line = rendered.plain.count('\n') + 1 if rendered else 0
                 self.focus_line = self.selected_line
             cells = list(values[i])
             if selected and self.editor is not None:
                 cells[self.field] = self.editor.render()
             content = table_row(cells, widths, self.app.console, selected=selected,
-                             expand=i in self.expanded or (selected and self.editor is not None),
-                             active=self.field if selected else None)
+                             expand=id(row) in self.expanded or (selected and self.editor is not None),
+                             selected_column=self.field)
             if selected and self.editor is not None:
                 self.focus_line += next((n for n, line in enumerate(content.plain.splitlines()) if '│' in line), 0)
             append(content)
-            if selected and self.options:
-                for n, option in enumerate(self.options):
-                    if n == self.option_index:
-                        self.focus_line = rendered.plain.count('\n') + 1
-                    append(table_row(('', ('> ' if n == self.option_index else '  ') + option, ''),
-                                     widths, self.app.console, expand=True))
         if not self.rows:
             append(Text('  -'))
+        if self.view == 'company':
+            # Let even the final company align below the fixed homepage header.
+            height = self.query_one('#company-scroll').scrollable_content_region.height
+            rendered.append('\n' * max(0, height - 1))
         return rendered
 
     def redraw(self):
+        header = self.query_one(CompanyHeader)
+        header.display = True
+        header.refresh()
         self.query_one('#company-title', Static).update(self.heading())
-        help_text = {'company': '→ / v value   d delivery   / search   q quit',
-                     'value': '← company   d delivery   j jobs   Space expand',
-                     'delivery': '← back   v value   → edit   a add   d delete   Space expand'}[self.view]
-        if self.field is not None:
-            help_text = '↑ ↓ field / option   → edit / select   ← back   Enter finish text'
+        help_text = ('→ strategy   j jobs   / search   Space expand   q quit' if self.view == 'company' else
+                     '↑ ↓ ← → cell   Enter edit   Esc home   j jobs   i identity   Space expand\n'
+                     'S strategy   M makeup   D direction   C clients   F franchise   L leadership')
+        if self.editor is not None:
+            help_text = 'Enter commit   Esc commit   Space insert space'
         self.query_one('#company-help', Static).update(help_text)
         self.query_one(CompanyTable).refresh(layout=True)
         self.call_after_refresh(self.reveal_selection)
@@ -197,7 +254,16 @@ class CompanyScreen(Screen):
             # Compute current row coordinates before scrolling; compositor renders
             # may otherwise leave coordinates one keypress behind.
             self.render_table(self.query_one(CompanyTable).content_size.width or 80)
-            self.query_one('#company-scroll', VerticalScroll).scroll_to_region(
+            scroll = self.query_one('#company-scroll', VerticalScroll)
+            if self.view == 'company' and self.align_company_top:
+                target = self.selected_line if self.rows else 0
+                # Detail-to-home layout may still have the detail's scroll extent.
+                # The table resize callback retries once the new extent is ready.
+                if target <= scroll.max_scroll_y:
+                    scroll.scroll_to(y=target, animate=False, immediate=True)
+                    self.align_company_top = False
+                return
+            scroll.scroll_to_region(
                 Region(0, self.focus_line, 1, 1), animate=False, immediate=True)
 
     def move_search_cursor(self, delta):
@@ -221,33 +287,62 @@ class CompanyScreen(Screen):
         self.query_one(CompanyTable).focus()
 
     def switch(self, view):
-        self.field = self.editor = None
-        self.options = ()
-        self.draft = None
+        if self.view == 'company':
+            selected = self.selected()
+            self.selected_company_id = selected['id'] if selected else None
+            self.company_index = self.index
+        self.field = None if view == 'company' else 0
+        self.editor = None
         self.view = view
+        self.blank_row = None
+        self.align_company_top = view == 'company'
         self.index = 0
         self.expanded.clear()
         self.reload()
+        if view == 'company':
+            self.index = next((i for i, row in enumerate(self.rows)
+                               if row['id'] == self.selected_company_id),
+                              max(0, min(self.company_index, len(self.rows) - 1)))
         self.redraw()
 
     def persist(self):
-        if self.draft:
-            if not self.draft.get('entity', '').strip() or self.draft.get('type') not in TYPES[self.draft['section']]:
-                return
-            self.company.setdefault('delivery', []).append(self.draft)
-            self.draft = None
         self.store.save_company(self.company)
 
     def finish_text(self):
         row = self.selected()
-        key = ('entity', 'type', 'detail')[self.field]
-        value = self.editor.value.strip()
-        if key == 'entity' and not value:
-            self.app.notify('Entity is required.', severity='error')
-            return
-        row[key] = value or None
+        key = self.headers[self.field].lower()
+        value = cell(self.editor.value)
+        if value == cell(row.get(key)):
+            self.editor = None
+            return True
+        old = dict(row)
+        rows = self.company[self.view]
+        previous_rows = list(rows)
+        row[key] = value
+        is_blank = row is self.blank_row
+        if is_blank:
+            rows.append(row)
+        elif all(cell(row.get(column.lower())) == '-' for column in self.headers):
+            rows[:] = [r for r in rows if r is not row]
+        try:
+            self.persist()
+        except (ValueError, OSError) as exc:
+            rows[:] = previous_rows
+            row.clear()
+            row.update(old)
+            self.app.notify(str(exc), severity='error')
+            return False
+        if is_blank:
+            self.blank_row = None
         self.editor = None
-        self.persist()
+        self.reload()
+        self.index = next((i for i, r in enumerate(self.rows) if r is row), self.index)
+        return True
+
+    def on_descendant_blur(self, event):
+        if event.widget is self.query_one(CompanyTable) and self.editor is not None:
+            self.finish_text()
+            self.redraw()
 
     def on_paste(self, event):
         if self.editor is not None:
@@ -262,38 +357,25 @@ class CompanyScreen(Screen):
         key = event.key
         row = self.selected()
         if self.editor is not None:
-            if key == 'enter' or (key == 'left' and self.editor.cursor == 0 and not self.editor.all_selected):
+            if key in ('enter', 'escape'):
                 self.finish_text()
-            elif key == 'escape':
-                self.editor = None
             elif key in ('left', 'right', 'home', 'end', 'backspace', 'delete', 'ctrl+a'):
                 method = {'left': 'move_left', 'right': 'move_right', 'home': 'move_home', 'end': 'move_end', 'ctrl+a': 'select_all'}.get(key, key)
                 getattr(self.editor, method)()
             elif event.is_printable:
                 self.editor.insert(event.character)
-        elif self.options:
-            if key in ('up', 'down'):
-                self.option_index = (self.option_index + (1 if key == 'down' else -1)) % len(self.options)
-            elif key == 'right':
-                row['type'] = self.options[self.option_index]
-                self.options = ()
-                self.persist()
-            elif key in ('left', 'escape'):
-                self.options = ()
-        elif self.field is not None:
-            if key in ('up', 'down'):
-                self.field = max(0, min(2, self.field + (1 if key == 'down' else -1)))
-            elif key == 'right':
-                if self.field == 1:
-                    self.options = TYPES[row['section']]
-                    self.option_index = self.options.index(row['type']) if row['type'] in self.options else 0
-                else:
-                    self.editor = InlineBuffer.from_value(row.get(('entity', 'type', 'detail')[self.field]) or '')
-                    self.editor.move_home()
-            elif key in ('left', 'escape'):
-                self.field = None
-                self.draft = None
-                self.reload()
+        elif self.view != 'company' and key in ('left', 'right'):
+            if key == 'left' and self.field == 0:
+                self.switch('company')
+            else:
+                self.field = max(0, min(len(self.headers) - 1,
+                                        self.field + (1 if key == 'right' else -1)))
+        elif self.view != 'company' and key == 'enter' and row:
+            value = cell(row.get(self.headers[self.field].lower()))
+            self.editor = InlineBuffer.from_value('' if value == '-' else value)
+            self.editor.move_home()
+        elif self.view != 'company' and key == 'escape':
+            self.switch('company')
         elif key in ('up', 'down'):
             self.move_search_cursor(1 if key == 'down' else -1)
         elif key == 'q':
@@ -307,43 +389,27 @@ class CompanyScreen(Screen):
                 self.switch('company')
             elif len(self.app.screen_stack) > 2:
                 self.app.pop_screen()
-        elif self.view == 'company' and key in ('right', 'v', 'd') and row:
+        elif self.view == 'company' and (key == 'right' or key.lower() in TABLE_KEYS) and row:
             self.company = deepcopy(row)
-            self.switch('delivery' if key == 'd' else 'value')
-        elif self.view == 'value' and key == 'd':
-            self.switch('delivery')
-        elif self.view == 'delivery' and key == 'v':
-            self.switch('value')
-        elif self.view == 'value' and key == 'j' and row:
-            self.app.push_screen(HomeScreen(self.store, company_context=self.company, client_context=row))
-        elif self.view == 'delivery' and key == 'right' and row and not row.get('_empty'):
-            self.field = 0
-        elif self.view == 'delivery' and key == 'a':
-            section = row['section'] if row else 'control'
-            self.draft = {'section': section, 'entity': '', 'type': None, 'detail': None, 'evidence': []}
-            self.reload()
-            self.index = self.rows.index(self.draft)
-            self.field = 0
-            self.editor = InlineBuffer.from_value('')
-        elif self.view == 'delivery' and key in ('d', 'x') and row and not row.get('_empty'):
-            def confirmed(answer):
-                if answer:
-                    self.company['delivery'].remove(row)
-                    self.persist()
-                    self.reload()
-                    self.redraw()
-            self.app.push_screen(ConfirmDelete(row['entity']), confirmed)
+            self.switch(TABLE_KEYS.get(key.lower(), 'strategy'))
+        elif self.view != 'company' and key.lower() in TABLE_KEYS:
+            self.switch(TABLE_KEYS[key.lower()])
+        elif key == 'j' and row:
+            company = row if self.view == 'company' else self.company
+            self.app.push_screen(CompanyJobsScreen(self.store, company))
+        elif self.view != 'company' and key == 'i':
+            from .company_editing import CompanyIdentityEditor
+            self.app.push_screen(CompanyIdentityEditor(self.company, self.store), lambda _: self.redraw())
         elif key == 'space' and row:
-            headers = {'company': ('COMPANY', 'CLIENTS', 'SEGMENTS', 'SHARE', 'Δ', 'VALUE'),
-                       'value': ('CLIENT', 'SEGMENT', 'SERVICE', 'WALLET', 'CAPTURE', 'SHARE', 'Δ', 'VALUE'),
-                       'delivery': ('ENTITY', 'TYPE', 'DETAIL')}[self.view]
-            widths = widths_for(headers, [self.values(r) for r in self.rows], self.query_one(CompanyTable).content_size.width)
-            if self.index in self.expanded:
-                self.expanded.remove(self.index)
-            elif any(Text(v).cell_len > w for v, w in zip(self.values(row), widths)):
-                self.expanded.add(self.index)
+            self.toggle_expanded(row)
         else:
             return
         event.prevent_default()
         event.stop()
         self.redraw()
+
+    def toggle_expanded(self, row):
+        if id(row) in self.expanded:
+            self.expanded.remove(id(row))
+        else:
+            self.expanded.add(id(row))

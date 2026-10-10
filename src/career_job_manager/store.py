@@ -6,14 +6,21 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
 from .model import ApplicationRecord, sort_records
 from .importing import parse_import
 from .naming import application_stem, readable_folder_name
 from .timing import timing_precision
-from .company import company_union, merge_companies, merge_data, resolve, validate_companies
+from .company import company_union, merge_companies, merge_data, resolve, validate_companies, migrate_company
+
+
+class ImportResult(NamedTuple):
+    """Created and materially updated counts per category; unchanged rows count as neither."""
+
+    jobs: tuple[int, int]
+    companies: tuple[int, int]
 
 
 class CareerStore:
@@ -25,6 +32,12 @@ class CareerStore:
         self.applications_dir.mkdir(parents=True, exist_ok=True)
         if not self.metadata_path.exists():
             self._save([])
+        else:
+            payload = self._document()
+            migrated = [migrate_company(c) for c in payload.get('companies', [])]
+            if migrated != payload.get('companies', []):
+                payload['companies'] = migrated
+                self._write(payload)
 
     def list(self) -> list[ApplicationRecord]:
         return sort_records(self._load())
@@ -35,7 +48,7 @@ class CareerStore:
                 return record
         raise KeyError(record_id)
 
-    def import_jobs(self, payload: object) -> tuple[int, int]:
+    def import_jobs(self, payload: object) -> ImportResult:
         if not isinstance(payload, dict):
             raise ValueError('Expected a JSON object.')
         if not {'jobs', 'applications', 'companies'} & payload.keys():
@@ -102,15 +115,21 @@ class CareerStore:
                 data = {k: merge_data({k: previous[k]}, {k: v})[k]
                         if k in previous and isinstance(v, (dict, list)) else v
                         for k, v in data.items()}
-                self.update(old.id, data, _preserve_existing_actions=True)
-                updated += 1
+                merged = self.update(old.id, data, _preserve_existing_actions=True)
+                updated += merged.to_dict() != previous
         document = self._document()
+        previous_companies = {c['id']: c for c in merge_companies([], document.get('companies', []))}
         document['companies'] = merge_companies(document.get('companies', []), companies)
         for key, value in payload.items():
             if key not in {'jobs', 'applications', 'companies', 'schema_version', 'version'}:
                 document[key] = merge_data({key: document[key]}, {key: value})[key] if key in document else value
         self._write(document)
-        return created, updated
+        # Compare the canonical company data after writing.
+        merged_companies = merge_companies([], document['companies'])
+        companies_created = sum(c['id'] not in previous_companies for c in merged_companies)
+        companies_updated = sum(c['id'] in previous_companies and c != previous_companies[c['id']]
+                                for c in merged_companies)
+        return ImportResult((created, updated), (companies_created, companies_updated))
 
     def _folder(self, record: ApplicationRecord) -> Path:
         if record.folder_name:
@@ -346,11 +365,7 @@ class CareerStore:
         return payload
 
     def _write(self, payload: dict) -> None:
-        for company in payload.get('companies', []):
-            for client in company.get('clients', []):
-                client.pop('share', None)
-                for observation in client.get('observations', []):
-                    observation.pop('share', None)
+        payload['companies'] = [migrate_company(c) for c in payload.get('companies', [])]
         text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
         fd, temp_name = tempfile.mkstemp(prefix=".applications.", suffix=".tmp", dir=self.root)
         try:

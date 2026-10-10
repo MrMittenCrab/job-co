@@ -1,22 +1,31 @@
-"""Company identity, lossless intelligence merge, and deterministic derived views."""
+"""Company identity and the six canonical company tables."""
 from __future__ import annotations
 
 from copy import deepcopy
-import math
+from decimal import Decimal, InvalidOperation
 import re
-from statistics import median
 import unicodedata
 import uuid
 
-VALUES = ('Research', 'Access', 'Execution', 'Financing', 'Performance', 'Risk',
-          'Distribution', 'Technology', 'Service', 'Trust')
-SECTIONS = ('control', 'operate', 'source')
-TYPES = {
-    'control': ('Controlling shareholder', 'Largest shareholder', 'Dominant shareholder',
-                'Founder', 'Chairman', 'CEO', 'CIO', 'General manager', 'Business head'),
-    'operate': ('Parent', 'Subsidiary', 'Branch'),
-    'source': ('Supplier',),
+TABLES = {
+    'strategy': ('Department', 'Revenue', 'Rank', 'Model'),
+    'makeup': ('Department', 'Revenue', 'Scale', 'Mix'),
+    'direction': ('Department', 'Revenue', 'Growth', 'Edge'),
+    'clients': ('Client', 'Period', 'Engagement', 'Role'),
+    'franchise': ('Entity', 'Parent', 'Footprint'),
+    'leadership': ('Layer', 'Parent', 'Composition'),
 }
+TABLE_KEYS = dict(zip('smdcfl', TABLES))
+SEPARATOR = ' · '
+MISSING = {'', '-', 'undisclosed', 'n/d', 'n/a', 'unknown', 'not disclosed'}
+LEGACY_CLIENT_FIELDS = {'service', 'segment', 'observations', 'wallet', 'capture',
+                        'share', 'momentum', 'value', 'benefit', 'coverage', 'geography'}
+
+
+def cell(value):
+    """Only literal middle dots define phrases; missing phrases carry no facts."""
+    phrases = [part.strip() for part in str(value if value is not None else '').split('·')]
+    return SEPARATOR.join(p for p in phrases if p.casefold() not in MISSING) or '-'
 
 
 def normalize(value):
@@ -52,27 +61,38 @@ def merge_data(old, new):
     return result
 
 
-def merge_rows(old, new, key, merge=merge_data):
-    result = deepcopy(old)
-    for row in new:
-        index = next((i for i, r in enumerate(result) if key(r) == key(row)), None)
-        if index is None:
-            result.append(deepcopy(row))
-        else:
-            result[index] = merge(result[index], row)
-    return result
-
-
-def merge_client(old, new):
-    result = merge_data(old, {k: v for k, v in new.items() if k != 'observations'})
-    result['observations'] = merge_rows(old.get('observations', []), new.get('observations', []),
-                                        lambda o: str(o.get('period')))
+def migrate_company(company, *, fill=True):
+    """Discard obsolete intelligence, retaining identity and unrelated metadata."""
+    result = deepcopy(company)
+    if 'composition' in result:
+        result.setdefault('makeup', []).extend(result.pop('composition'))
+    for row in result.get('strategy', []):
+        if 'position' in row:
+            legacy = cell(row.pop('position'))
+            rank = cell(row.get('rank'))
+            # Preserve distinct values if a partially migrated row has both keys.
+            row['rank'] = cell(SEPARATOR.join(dict.fromkeys(
+                value for value in (rank, legacy) if value != '-')))
+    result.pop('value', None)
+    result.pop('delivery', None)
+    # Old VALUE relationships share a storage name with the new CLIENTS table.
+    # Their fields identify them; never convert any of their contents.
+    result['clients'] = [r for r in result.get('clients', [])
+                         if not LEGACY_CLIENT_FIELDS.intersection(r)]
+    for table, columns in TABLES.items():
+        result.setdefault(table, [])
+        for row in result[table]:
+            for column in columns:
+                key = column.lower()
+                if fill or key in row:
+                    row[key] = cell(row.get(key))
     return result
 
 
 def merge_companies(old, incoming):
-    result = deepcopy(old)
+    result = [migrate_company(c) for c in old]
     for item in incoming:
+        item = migrate_company(item, fill=False)
         found = resolve(result, item.get('id'), item.get('name'))
         if found is None:
             for alias in item.get('aliases', []):
@@ -80,16 +100,28 @@ def merge_companies(old, incoming):
                 if found is not None:
                     break
         if found is None:
-            found = {'id': item.get('id') or uuid.uuid5(uuid.NAMESPACE_URL, 'company:' + normalize(item['name'])).hex, 'name': item['name'],
-                     'aliases': [], 'clients': [], 'delivery': []}
-            result.append(found)
-        merged = merge_data(found, {k: v for k, v in item.items() if k not in ('clients', 'delivery', 'id')})
+            found = {'id': item.get('id') or uuid.uuid5(uuid.NAMESPACE_URL, 'company:' + normalize(item['name'])).hex,
+                     'name': item['name'], 'aliases': []}
+            found.update(deepcopy(item))
+            result.append(migrate_company(found))
+            continue
+        merged = merge_data(found, {k: v for k, v in item.items() if k not in (*TABLES, 'id')})
         if normalize(found['name']) != normalize(merged['name']):
             merged['aliases'] = list(dict.fromkeys([*merged.get('aliases', []), found['name']]))
-        merged['clients'] = merge_rows(found.get('clients', []), item.get('clients', []),
-            lambda r: (normalize(r.get('client')), normalize(r.get('service'))), merge_client)
-        merged['delivery'] = merge_rows(found.get('delivery', []), item.get('delivery', []),
-            lambda r: (r.get('section'), normalize(r.get('entity')), normalize(r.get('type'))))
+        for table, columns in TABLES.items():
+            rows = deepcopy(found.get(table, []))
+            def identity(row):
+                if row.get('id'):
+                    return ('id', row['id'])
+                return (normalize(row.get(columns[0].lower())),
+                        cell(row.get('period')) if table == 'clients' else '')
+            for row in item[table]:
+                index = next((i for i, r in enumerate(rows) if identity(r) == identity(row)), None)
+                if index is None:
+                    rows.append(deepcopy(row))
+                else:
+                    rows[index] = merge_data(rows[index], row)
+            merged[table] = rows
         result[result.index(found)] = merged
     return result
 
@@ -98,175 +130,65 @@ def company_union(companies, jobs):
     result = merge_companies([], companies)
     for job in jobs:
         if resolve(result, job.company_id, job.company) is None:
-            result.append({'id': job.company_id or uuid.uuid5(uuid.NAMESPACE_URL, 'company:' + normalize(job.company)).hex,
-                           'name': job.company, 'aliases': [], 'clients': [], 'delivery': []})
+            result.append(migrate_company({
+                'id': job.company_id or uuid.uuid5(uuid.NAMESPACE_URL, 'company:' + normalize(job.company)).hex,
+                'name': job.company, 'aliases': []}))
     return sorted(result, key=lambda c: (normalize(c['name']), c['id']))
 
 
 def validate_companies(companies):
     if not isinstance(companies, list):
         raise ValueError('companies must be an array.')
-    for c in companies:
-        if not isinstance(c, dict) or not isinstance(c.get('name'), str) or not c['name'].strip():
+    for company in companies:
+        if not isinstance(company, dict) or not isinstance(company.get('name'), str) or not company['name'].strip():
             raise ValueError('Company name is required.')
-        if c.get('id') is not None and not isinstance(c['id'], str):
+        if company.get('id') is not None and not isinstance(company['id'], str):
             raise ValueError('Company id must be a string.')
-        if not isinstance(c.get('aliases', []), list) or any(not isinstance(a, str) for a in c.get('aliases', [])):
+        if not isinstance(company.get('aliases', []), list) or any(not isinstance(a, str) for a in company.get('aliases', [])):
             raise ValueError('aliases must be strings.')
-        for key in ('clients', 'delivery'):
-            if not isinstance(c.get(key, []), list) or any(not isinstance(r, dict) for r in c.get(key, [])):
-                raise ValueError(f'{key} must be an array of objects.')
-        for row in c.get('delivery', []):
-            if row.get('section') not in SECTIONS:
-                raise ValueError('Delivery section must be control, operate, or source.')
-            for key in ('entity', 'type'):
-                if not isinstance(row.get(key), str) or not row[key].strip():
-                    raise ValueError(f'Delivery {key} is required.')
-        for row in c.get('clients', []):
-            for key in ('client', 'service'):
-                if not isinstance(row.get(key), str) or not row[key].strip():
-                    raise ValueError(f'Client {key} is required.')
-            if not isinstance(row.get('observations', []), list) or any(not isinstance(o, dict) for o in row.get('observations', [])):
-                raise ValueError('observations must be an array of objects.')
+        for table, columns in {**TABLES, 'composition': TABLES['makeup']}.items():
+            rows = company.get(table, [])
+            if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
+                raise ValueError(f'{table} must be an array of objects.')
+            for row in rows:
+                if table == 'clients' and LEGACY_CLIENT_FIELDS.intersection(row):
+                    continue  # Obsolete imports are discarded, just like stored data.
+                for column in columns:
+                    value = row.get(column.lower())
+                    if value is not None and not isinstance(value, str):
+                        raise ValueError(f'{column} must be text or null.')
 
 
-def number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+def revenue_key(value):
+    text = cell(value).casefold().replace(',', '')
+    match = re.fullmatch(
+        r'\s*(?:(?:(?:usd|hkd|cny|rmb|eur|gbp|jpy|chf|aud|cad|sgd|nzd|inr|krw|'
+        r'twd|sek|nok|dkk|aed|sar|zar|brl|mxn)\s*[$€£¥￥₹₩]?|'
+        r'(?:us|hk|a|c|s|nz|nt)\$|[$€£¥￥₹₩])\s*)?'
+        r'([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*(k|mn|m|bn|b|tn|t)?\s*', text)
+    if not match:
+        return (True, Decimal(0))
+    try:
+        amount = Decimal(match[1]) * {'k': 10**3, 'mn': 10**6, 'm': 10**6,
+                                    'bn': 10**9, 'b': 10**9, 'tn': 10**12, 't': 10**12, None: 1}[match[2]]
+        return (False, -amount)
+    except InvalidOperation:
+        return (True, Decimal(0))
 
 
-def latest(row):
-    return max(row.get('observations', []), key=lambda o: period_key(o.get('period')), default={})
+def period_key(value):
+    years = re.findall(r'(?<!\d)\d{4}(?!\d)', cell(value))
+    return (not bool(years), -int(years[-1]) if years else 0)
 
 
-def period_key(period):
-    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in re.findall(r'\d+|\D+', str(period or '')))
+def ordered_rows(company, table):
+    rows = list(company.get(table, []))
+    if table in ('strategy', 'makeup', 'direction'):
+        rows.sort(key=lambda r: revenue_key(r.get('revenue')))
+    elif table == 'clients':
+        rows.sort(key=lambda r: period_key(r.get('period')))
+    return rows
 
 
-def signature(observation, kind, row):
-    amount = observation.get(kind) or {}
-    if not isinstance(amount, dict) or not amount.get('currency'):
-        return None
-    if amount.get('period', observation.get('period')) != observation.get('period'):
-        return None
-    if normalize(amount.get('service', observation.get('service', row.get('service')))) != normalize(row.get('service')):
-        return None
-    return (amount['currency'], amount.get('unit', amount.get('units', 'currency')), normalize(row.get('service')))
-
-
-def share(row, observation=None):
-    observation = latest(row) if observation is None else observation
-    w, c = observation.get('wallet') or {}, observation.get('capture') or {}
-    if not isinstance(w, dict) or not isinstance(c, dict):
-        return None
-    wa, ca = w.get('amount'), c.get('amount')
-    if (not observation.get('period') or not normalize(row.get('service')) or
-        not number(wa) or not number(ca) or wa <= 0 or ca < 0):
-        return None
-    sig = signature(observation, 'wallet', row)
-    if sig is None or sig != signature(observation, 'capture', row):
-        return None
-    return ca / wa
-
-
-def momentum(row):
-    observations = sorted(row.get('observations', []), key=lambda o: period_key(o.get('period')), reverse=True)
-    if observations:
-        current = observations[0]
-        value = share(row, current)
-        for previous in observations[1:]:
-            old = share(row, previous)
-            if (value is not None and old is not None and previous.get('period') != current.get('period')
-                and signature(current, 'wallet', row) == signature(previous, 'wallet', row)
-                and re.sub(r'\d', '#', str(current['period'])) == re.sub(r'\d', '#', str(previous['period']))):
-                return (value - old) * 100
-    return row.get('momentum') if row.get('momentum') in ('up', 'flat', 'down') else None
-
-
-def display_delta(value):
-    return f'{value:+.1f}pp' if number(value) else {'up': '↑', 'flat': '→', 'down': '↓'}.get(value, '-')
-
-
-def display_share(value):
-    return '-' if value is None else f'{value * 100:.1f}%'
-
-
-def money(amount):
-    if not isinstance(amount, dict) or not number(amount.get('amount')):
-        return '-'
-    value = amount['amount']
-    scale, suffix = next(((n, s) for n, s in ((1e9, 'bn'), (1e6, 'm'), (1e3, 'k')) if abs(value) >= n), (1, ''))
-    currency = amount.get('currency')
-    if not currency:
-        return '-'
-    prefix = {'CNY': '¥', 'USD': '$', 'EUR': '€', 'GBP': '£'}.get(currency, currency + ' ')
-    unit = amount.get('unit', amount.get('units', 'currency'))
-    return f'{prefix}{value / scale:g}{suffix}' + (f' {unit}' if unit != 'currency' else '')
-
-
-def capture_weights(rows):
-    signatures, weights = [], []
-    for row in rows:
-        o = latest(row)
-        capture = o.get('capture') or {}
-        sig = signature(o, 'capture', row)
-        if sig is None or not o.get('period') or not number(capture.get('amount')) or capture['amount'] < 0:
-            return None
-        signatures.append((sig, o['period']))
-        weights.append(capture['amount'])
-    if not signatures or len(set(signatures)) != 1 or sum(weights) <= 0:
-        return None
-    return weights
-
-
-def aggregate(company):
-    rows = company.get('clients', [])
-    weights = capture_weights(rows)
-    segments = {}
-    for i, row in enumerate(rows):
-        segment = row.get('segment') or '-'
-        if weights is not None:
-            segments[segment] = segments.get(segment, 0) + weights[i]
-        else:
-            segments.setdefault(segment, set()).add(normalize(row.get('client')))
-    if weights is None:
-        segments = {k: len(v) for k, v in segments.items()}
-    leading, cumulative = [], 0
-    for name, weight in sorted(segments.items(), key=lambda kv: (-kv[1], kv[0].casefold())):
-        # Residual Other / unknown buckets carry weight but do not identify a
-        # leading client segment (e.g. 30% Public + 22% Hedge + 28% Other).
-        if normalize(name) in ('other', ''):
-            continue
-        leading.append(name)
-        cumulative += weight
-        if cumulative > sum(segments.values()) / 2:
-            break
-    shares = [s for row in rows if (s := share(row)) is not None]
-    deltas = [momentum(row) for row in rows]
-    numeric = [d for d in deltas if number(d)]
-    qualitative = [d for d in deltas if isinstance(d, str)]
-    delta = median(numeric) if numeric else next((d for d in ('up', 'flat', 'down') if qualitative.count(d) > len(qualitative) / 2), None)
-    valued = [r for r in rows if r.get('value') in VALUES]
-    value_weights = capture_weights(valued)
-    tags = {}
-    for i, row in enumerate(valued):
-        tags[row['value']] = tags.get(row['value'], 0) + (value_weights[i] if value_weights is not None else 1)
-    return (str(len({normalize(r.get('client')) for r in rows if normalize(r.get('client'))})),
-            ' · '.join(leading) or '-', display_share(median(shares) if shares else None),
-            display_delta(delta), sorted(tags, key=lambda t: (-tags[t], t))[0] if tags else '-')
-
-
-def relevance(job, client):
-    def terms(value):
-        return {normalize(v) for v in (value if isinstance(value, list) else [value]) if normalize(v)}
-    data = job.to_dict()
-    result = []
-    for job_key, client_key in (('service', 'service'), ('coverage', 'coverage'), ('geography', 'geography'), ('client_segment', 'segment'), ('value', 'value')):
-        a, b = terms(data.get(job_key)), terms(client.get(client_key))
-        if job_key == 'value':
-            a &= {normalize(v) for v in VALUES}
-            b &= {normalize(v) for v in VALUES}
-        result.append(len(a & b))
-    text = normalize(' '.join(str(data.get(k) or '') for k in ('job', 'role', 'program', 'description_text', 'brief', 'description')))
-    context = normalize(' '.join(str(client.get(k) or '') for k in ('client', 'service', 'coverage', 'geography', 'segment', 'value')))
-    result.append(len(set(text.split()) & set(context.split())))
-    return tuple(-v for v in result)
+def departments(company):
+    return cell(SEPARATOR.join(cell(r.get('department')) for r in ordered_rows(company, 'strategy')))

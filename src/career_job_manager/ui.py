@@ -31,6 +31,30 @@ from .presentation import (
 from .store import CareerStore
 
 
+def watch_store(screen, refresh_records):
+    """Refresh visible lists after atomic database replacements; defer editors."""
+    def revision():
+        stat = screen.store.metadata_path.stat()
+        return stat.st_ino, stat.st_mtime_ns, stat.st_size
+
+    previous = revision()
+
+    def poll():
+        nonlocal previous
+        if screen.app.screen is not screen:
+            return
+        try:
+            current = revision()
+            if current != previous and refresh_records():
+                previous = current
+        except (OSError, ValueError):
+            # A missing or partially written external file is retried next tick.
+            # Keep the last successfully loaded view intact.
+            return
+
+    screen.set_interval(1, poll)
+
+
 class SearchInput(Input):
     """Borderless search input that leaves list movement on the arrow keys."""
 
@@ -44,7 +68,7 @@ class SearchInput(Input):
             screen.move_search_cursor(1)
             event.prevent_default()
             event.stop()
-        elif event.key == "escape" and hasattr(screen, "clear_search"):
+        elif event.key in {"left", "escape"} and hasattr(screen, "clear_search"):
             screen.clear_search()
             event.prevent_default()
             event.stop()
@@ -401,7 +425,7 @@ class HomeScreen(Screen):
         ("left", "back_context", "Back"),
         ("/", "start_search", "Search"),
         ("d", "delete_application", "Delete"),
-        ("escape", "quit_app", "Quit"),
+        ("q", "quit_app", "Quit"),
     ]
 
     def __init__(self, store: CareerStore, company_context=None, client_context=None) -> None:
@@ -410,27 +434,39 @@ class HomeScreen(Screen):
         self.company_context = company_context
         self.client_context = client_context
         self.visible_records: list[ApplicationRecord] = []
+        self.opened_record_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Static("APPLICATIONS", id="home-title")
         yield ApplicationList(id="applications")
         yield SearchInput(placeholder="Search", id="search")
-        yield Static("a add   → open   c company   / search   d delete   Esc quit", id="home-help")
+        yield Static("a add   → open   c company   / search   d delete   q quit", id="home-help")
 
     def on_mount(self) -> None:
         self.query_one("#search", SearchInput).styles.display = "none"
         self.refresh_list()
         self.query_one("#applications", ApplicationList).focus()
+        watch_store(self, self.refresh_external)
+
+    def refresh_external(self) -> bool:
+        selected = self.selected_record()
+        self.refresh_list()
+        widget = self.query_one(ApplicationList)
+        if selected:
+            widget.selected_index = next(
+                (i for i, record in enumerate(self.visible_records) if record.id == selected.id),
+                widget.selected_index)
+        widget.refresh()
+        return True
 
     def refresh_list(self) -> None:
         search = self.query_one("#search", SearchInput)
         self.visible_records = filter_records(self.store.list(), search.value)
         if self.company_context:
-            from .company import resolve, relevance
+            from .company import resolve
             companies = self.store.companies()
             self.visible_records = [r for r in self.visible_records
                                     if (resolve(companies, r.company_id, r.company) or {}).get('id') == self.company_context['id']]
-            self.visible_records.sort(key=lambda r: relevance(r, self.client_context or {}))
         self.query_one("#applications", ApplicationList).set_records(self.visible_records)
 
     def selected_record(self) -> ApplicationRecord | None:
@@ -458,6 +494,7 @@ class HomeScreen(Screen):
     def open_selected(self) -> None:
         record = self.selected_record()
         if record is not None:
+            self.opened_record_id = record.id
             self.app.push_screen(ApplicationScreen(self.store, record.id), self._after_application)
 
     def action_open_company(self) -> None:
@@ -466,13 +503,14 @@ class HomeScreen(Screen):
             from .company import resolve
             from .company_ui import CompanyScreen
             company = resolve(self.store.companies(), record.company_id, record.company)
-            self.app.push_screen(CompanyScreen(self.store, company, 'value', record))
+            self.app.push_screen(CompanyScreen(self.store, company, 'strategy', record))
 
     def action_back_context(self) -> None:
         if self.company_context and not self.query_one('#search', SearchInput).has_focus:
             self.app.pop_screen()
 
     def action_add_application(self) -> None:
+        self.opened_record_id = None
         self.app.push_screen(ApplicationScreen(self.store), self._after_application)
 
     def action_start_search(self) -> None:
@@ -510,6 +548,12 @@ class HomeScreen(Screen):
     def _after_application(self, saved: bool | None) -> None:
         if saved:
             self.refresh_list()
+            widget = self.query_one(ApplicationList)
+            widget.selected_index = next(
+                (i for i, record in enumerate(self.visible_records)
+                 if record.id == self.opened_record_id), widget.selected_index)
+            widget.refresh()
+        self.opened_record_id = None
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search":
@@ -530,7 +574,7 @@ class ApplicationScreen(Screen[bool]):
         ("right", "activate_field", "Choose"),
         ("c", "open_company", "Company"),
         ("left", "leave_choice", "Back"),
-        ("escape", "quit_app", "Quit"),
+        ("q", "quit_app", "Quit"),
     ]
 
     def __init__(self, store: CareerStore, record_id: str | None = None) -> None:
@@ -567,7 +611,7 @@ class ApplicationScreen(Screen[bool]):
         with VerticalScroll(id="form-list"):
             for field in FORM_FIELDS:
                 yield FieldRow(field, self.values[field])
-        yield Static("↑ ↓ / Tab navigate   → enter   ← back   c company   Enter finish   Esc quit", id="form-help")
+        yield Static("↑ ↓ / Tab navigate   → enter   ← back   c company   Enter finish   q quit", id="form-help")
 
     def on_mount(self) -> None:
         self._sync_target_visibility()
@@ -640,7 +684,7 @@ class ApplicationScreen(Screen[bool]):
         from .company import resolve
         from .company_ui import CompanyScreen
         company = resolve(self.store.companies(), record.company_id, record.company)
-        self.app.push_screen(CompanyScreen(self.store, company, 'value', record))
+        self.app.push_screen(CompanyScreen(self.store, company, 'strategy', record))
 
     def action_activate_field(self) -> None:
         row = self.focused
@@ -780,7 +824,8 @@ class ApplicationScreen(Screen[bool]):
 
 
 class CareerApp(App):
-    TITLE = "Career"
+    TITLE = "Job and Code"
+    BINDINGS = [("q", "quit", "Quit")]
     CSS = """
     Screen, ModalScreen {
         background: ansi_default;

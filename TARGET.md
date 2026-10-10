@@ -1,6 +1,6 @@
 > UX revision (2026-09-19): The Action-based behavior in README.md supersedes the historical Status/edit-mode/description-preview requirements below. Enter only saves and returns home from every field; Ctrl-S does not save. Right cycles choices (including Email), Left leaves the choice interaction keeping the value, and Right opens file selection. Wrapped values share one column on every line, without changing stored text. Action is directly selected (including Email); Status is migration-only. Text fields accept typing on focus, Enter saves and returns home, and full wrapping Description is last. CLI creation uses -C/-R/-D (or --company/--role/--deadline) and the normal store without opening the UI.
 
-# Career Job Manager — Version 1 Target
+# Job and Code — Historical Version 1 Target
 
 ## Goal
 

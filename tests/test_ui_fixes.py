@@ -17,20 +17,20 @@ def test_home_navigation_and_quit(tmp_path, open_key):
             store.add(ApplicationRecord(id=str(i), company=f'Company {i}', job='Role'))
         app = CareerApp(store)
         async with app.run_test() as pilot:
-            await pilot.press('q')
+            await pilot.press('escape')
             assert app.is_running
             await pilot.press('down', 'up', 'down', open_key)
             assert isinstance(app.screen, ApplicationScreen)
             assert app.screen.record_id == '1'
             await pilot.press('left')
             assert isinstance(app.screen, HomeScreen)
-            await pilot.press('escape')
+            await pilot.press('q')
             assert not app.is_running
     asyncio.run(scenario())
 
 
 @pytest.mark.parametrize('dropdown', [False, True])
-def test_escape_quits_job_page(tmp_path, dropdown):
+def test_escape_stays_and_q_quits_job_page(tmp_path, dropdown):
     async def scenario():
         store = CareerStore(tmp_path)
         store.add(ApplicationRecord(id='1', company='Company', job='Role'))
@@ -41,6 +41,8 @@ def test_escape_quits_job_page(tmp_path, dropdown):
                 app.screen._row('Action').focus()
                 await pilot.press('right')
             await pilot.press('escape')
+            assert app.is_running
+            await pilot.press('q')
             assert not app.is_running
     asyncio.run(scenario())
 

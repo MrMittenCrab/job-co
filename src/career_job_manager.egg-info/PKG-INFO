@@ -1,14 +1,18 @@
 Metadata-Version: 2.4
 Name: career-job-manager
 Version: 0.6.0
-Summary: Minimal macOS terminal job application manager
+Summary: Job and Code: JOB and COMPANY terminal applications
+Project-URL: Repository, https://github.com/MrMittenCrab/job-and-code
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: textual<9,>=8.2.8
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: jsonschema>=4; extra == "dev"
 
-# JOB / COMPANY
+# Job and Code — JOB / COMPANY
+
+Repository: https://github.com/MrMittenCrab/job-and-code
 
 A minimal keyboard-only macOS terminal application for keeping job applications ordered by recruitment timing or their next deadline.
 
@@ -58,7 +62,7 @@ New IDs create jobs with **Check**. Reusing an ID updates its imported fields wh
 
 `when` accepts an exact date (`2026-10-31`), a month (`2026-10`), an inclusive month range (`2026-09..2026-10`), or a season (`2026-fall`). Seasons are spring (March–May), summer (June–August), fall (September–November), and winter (December–February of the following year). `2026-winter` therefore begins in December 2026. Ranges may cross years. No recruitment dates or recurrence are inferred.
 
-The existing homepage date cell displays an exact Deadline when present; otherwise it displays `when` as `31 Oct`, `~Oct`, `~Sep–Oct`, or `~Fall`. Jobs with actions other than Check or Archive come first, followed by Check, then Archive, regardless of timing. Within each action group, exact dates sort chronologically before approximate periods; approximate periods sort by the end of `when`. Deadline takes precedence over `when`. Only jobs with neither receive the current season as stored timing; existing deadlines remain unchanged. January and February belong to the winter that began the previous December. No fake Deadline or additional form field is created.
+The existing homepage date cell displays an exact Deadline when present; otherwise it displays `when` as `31 Oct`, `~Oct`, `~Sep–Oct`, or `~Fall`. Jobs with actions other than Check come first, followed by Check. Within each group, exact dates sort chronologically before approximate periods; approximate periods sort by precision and the start of `when`. Deadline takes precedence over `when`. Only jobs with neither receive the current season as stored timing; existing deadlines remain unchanged. January and February belong to the winter that began the previous December. No fake Deadline or additional form field is created.
 
 Data lives under:
 
@@ -85,7 +89,9 @@ Right    open application
 a        add
 /        search Company / Job / Action / Contact
 d        delete
-Esc      quit
+q        quit (outside text editing)
+Left     exit search and clear its filter
+Esc      clear search; never quit
 ```
 
 ## Add and Application
@@ -112,7 +118,7 @@ HSBC — Global Banking Graduate
                advisory work. Full text wraps below.
 ```
 
-Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. Esc quits. Ctrl+A selects the entire text field; Backspace or Delete clears the selection. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
+Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Ctrl+A selects the entire text field; Backspace or Delete clears the selection. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
 
 On Action, Right opens the existing dropdown. Up/Down move the highlight; Left or Right commits the highlighted option and closes the dropdown. Enter commits the highlighted option and closes the dropdown; press Enter again to save and return home. Actions are Apply, Wait, Take, Go, Respond, Archive, Email, and Check. Manual applications default to Apply; JSON imports start at Check.
 
@@ -173,73 +179,53 @@ Legacy JSON is normalized on load. Records with neither a Deadline nor timing me
 
 ## COMPANY interface
 
-`company` opens COMPANY in the same Textual application; `job` continues to open
-JOB. Both use `~/Documents/Career/applications.json` and the same document folders.
-Saves use `{"version": 8, "jobs": [...], "companies": [...]}`. Legacy
-`applications` arrays are accepted and migrated. Unknown JSON fields survive
-load, edit, merge, and export. Existing JOB Action colors and controls are unchanged.
+Canonical company-intelligence research specification:
+[docs/company-intelligence.md](docs/company-intelligence.md).
 
-Both launchers support `import file.json` and `export file.json`. Export produces
-the combined canonical document, including internal evidence and optional matching
-metadata. Normalized version-1 job imports remain supported; unknown fields are
-retained, and optional `company_id`, `service`, `coverage`, `geography`,
-`client_segment`, and `value` are internal. Existing job Actions remain protected
-when importing. Imports merge companies by ID, then alias/name; relationships by
-client and service; observations by period; delivery by section, entity, and type.
-Explicit incoming scalar fields update existing values, omitted fields survive,
-nested objects merge, and distinct evidence/list entries are retained.
+Machine-readable import schema:
+[schemas/company-intelligence.schema.json](schemas/company-intelligence.schema.json).
 
-Company objects contain `id`, `name`, `aliases`, `clients`, and `delivery`.
-Employers without stored intelligence still appear with empty VALUE and DELIVERY
-views. No intelligence is inferred from jobs.
+`company` opens the company HOME; `job` continues to open JOB. Both use
+`~/Documents/Career/applications.json`, the existing document folders, and the
+same import/export commands. Job records and company/job links are preserved.
 
-A client relationship contains `client`, `segment`, `service`, `observations`,
-optional qualitative `momentum`, controlled `value`, editable/importable `benefit`,
-`coverage`, `geography`, and internal `evidence`. Observations contain `period`,
-`wallet`, and `capture`; amounts use `{ "amount": 100, "currency": "CNY" }`
-with optional `unit` (default: currency amounts). SHARE is never stored.
-Benefit and evidence are not displayed. VALUE vocabulary: Research, Access,
-Execution, Financing, Performance, Risk, Distribution, Technology, Service, Trust.
+Company HOME shows all stored companies, including those without jobs, with
+Company and Departments derived from STRATEGY. Right opens
+STRATEGY. Direct keys are S STRATEGY, M MAKEUP, D DIRECTION, C CLIENTS,
+F FRANCHISE, and L LEADERSHIP. Escape returns to HOME with the selected company at
+the top. Arrow keys select cells: Up/Down retain the column, Left/Right change it.
+Enter edits the selected cell; Enter or Escape commits cell edits; Escape in a detail view returns to HOME. Space expands
+normal rows and inserts spaces while editing. Select a cell and press Enter in
+the trailing blank row to add data; clearing every field removes a row on commit.
+Untouched blank rows are never saved. Use i to edit company identity. JOB's c
+opens employer STRATEGY. Company's j opens the normal job HOME filtered to that
+company, even with zero jobs; / changes or clears the search and Left returns.
 
-SHARE is capture / wallet for matching currency, units, service, and period.
-Momentum is percentage-point change from the latest comparable prior observation,
-otherwise an explicit up/flat/down arrow. Zero capture is known; missing amounts
-remain missing. No currency conversion occurs. COMPANY shows median relationship
-shares and numeric momentum; qualitative arrows require a strict majority when
-no numeric momentum exists. CLIENTS counts distinct normalized client names.
-Segments use comparable latest captures, otherwise unique-client counts, selecting
-leading named segments until their cumulative weight exceeds 50%; residual Other
-and unknown buckets remain in the denominator. VALUE uses comparable captures,
-otherwise relationship counts. Exact weight ties sort alphabetically. No valid
-Value tags means no dominant value.
+The six table arrays are `strategy`, `makeup`, `direction`, `clients`,
+`franchise`, and `leadership`. Legacy VALUE relationships and DELIVERY data are
+discarded on migration; new tables start empty when no new-format data exists.
+STRATEGY columns are Department, Revenue, Rank, Model. Legacy `position` values
+migrate to `rank`; imports and exports use `rank`.
+Company identity and unrelated metadata remain. There is no stored HOME summary.
+See the handbook above for exact columns, canonical middle-dot cell formatting,
+Revenue/Period ordering, migration, and import behavior.
 
-DELIVERY contains fixed CONTROL / OPERATE / SOURCE sections, each with aligned
-ENTITY / TYPE / DETAIL columns. Rows contain `section`, `entity`, `type`, nullable
-`detail`, optional `entity_kind`, and internal `evidence`. Importers should supply
-concrete named people and entities, distinguish controlling/largest/dominant
-shareholders, use actual legal/geographic operating entities, and include only
-immediate material suppliers. Existing unsupported types (for example an
-explicitly identified affiliate or brand) are retained without relabeling them
-as subsidiaries. Interactive TYPE choices are restricted by section.
+## External imports and existing installations
 
-| Screen | Keys |
-| --- | --- |
-| COMPANY | ↑↓ move; Right or v VALUE; d DELIVERY; / search; q quit |
-| VALUE | ↑↓ move; Left COMPANY; d DELIVERY; j same-company JOB results |
-| DELIVERY | ↑↓ row/section; Left COMPANY; v VALUE; Right edit row; a add; d or x confirmed delete |
-| DELIVERY row editing | ↑↓ field; Right edit/open; Left leave; Enter finishes text only |
-| TYPE dropdown | ↑↓ option; Right confirm; Left cancel |
-| JOB home or detail | c employer VALUE (outside text editing) |
+Both home lists check `applications.json` for changes once per second. External
+imports become visible without re-importing or restarting the corrected app.
+Selection and search text are retained; a filter may still exclude new rows.
+Left in either search clears the filter and restores normal list navigation.
+Detail editors are not replaced while editing; return to the list to see imports.
 
-Search is hidden until invoked; Enter leaves search because Left/Right control the
-text cursor. Space expands only width-truncated table rows, in place. Text editing
-uses the JOB inline buffer, including Ctrl+A, paste, and Left at the beginning to
-finish. Empty delivery sections can be selected to add their first row. A new row is saved
-only after both Entity and Type are explicitly supplied; no ownership or
-management role is assigned automatically.
+Imported Check jobs follow other actions. COMPANY keeps companies with STRATEGY
+departments first, followed by those without departments; both groups are
+searchable. JOB searches the stored company name, job, action, and contact;
+COMPANY also searches company aliases. The homepage uses only its main Company /
+Departments table, with no sidebar.
 
-Cross-navigation uses company identity as the hard link. Within that company,
-lexicographic matching prioritizes service, coverage, geography, segment, Value,
-then role/program/description text overlap, retaining existing order for ties.
-Jobs with no matching metadata remain visible. No relevance score, client detail
-screen, evidence browser, network calls, or AI classifiers are used.
+The Python distribution remains `career-job-manager`, the module remains
+`career_job_manager`, and the commands remain `job` and `company`. Existing
+editable installs can keep their local checkout directory name. Updates to that
+checkout take effect on the next launch; processes started before a code update
+need one restart to load the new code. Future data imports refresh automatically.

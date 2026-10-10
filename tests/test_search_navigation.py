@@ -40,10 +40,10 @@ def test_right_in_search_text_or_selection_keeps_editing(tmp_path):
         store.add(ApplicationRecord(id='1', company='A', job='Analyst'))
         app = CareerApp(store)
         async with app.run_test() as pilot:
-            await pilot.press('/', *'Analyst', 'left', 'right')
+            await pilot.press('/', *'Analyst', 'home', 'right')
             home = app.screen
             search = home.query_one(SearchInput)
-            assert search.cursor_position == 7
+            assert search.cursor_position == 1
             await pilot.press('home', 'shift+end', 'right')
             assert app.screen is home
             assert search.selection.is_empty

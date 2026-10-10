@@ -32,10 +32,13 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
             parser.error('import cannot be combined with manual creation arguments')
         try:
             payload = json.loads(args.file.read_text(encoding='utf-8'))
-            created, updated = CareerStore().import_jobs(payload)
+            result = CareerStore().import_jobs(payload)
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
-        print(f'Imported: {created} created, {updated} updated.')
+        if 'jobs' in payload or 'applications' in payload:
+            print(f'Jobs: {result.jobs[0]} created, {result.jobs[1]} updated.')
+        if 'companies' in payload:
+            print(f'Companies: {result.companies[0]} created, {result.companies[1]} updated.')
         return
     values = (args.company, args.role, args.deadline)
     if any(value is not None for value in values):
@@ -53,7 +56,7 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
         print(f"Created: {record.company} — {record.job} (deadline {record.deadline})")
         return
     if platform.system() != "Darwin":
-        print("Career Job Manager is designed for macOS.", file=sys.stderr)
+        print("Job and Code is designed for macOS.", file=sys.stderr)
         raise SystemExit(2)
     CareerApp(initial_root=initial_root).run(mouse=MOUSE_ENABLED)
 

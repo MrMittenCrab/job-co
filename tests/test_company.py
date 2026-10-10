@@ -1,313 +1,199 @@
 import asyncio
 from copy import deepcopy
 import json
-import tomllib
 from pathlib import Path
 
 import pytest
-from rich.text import Text
+from jsonschema import Draft202012Validator
 
-from career_job_manager import cli
-from career_job_manager.company import *
-from career_job_manager.company_ui import CompanyScreen, CompanyTable, widths_for, table_row
-from career_job_manager.model import ApplicationRecord
+from career_job_manager.company import (TABLES, cell, departments, ordered_rows,
+                                        resolve, revenue_key)
 from career_job_manager.store import CareerStore
-from career_job_manager.ui import CareerApp, HomeScreen, ApplicationList, ConfirmDelete
-
-
-def client(name='Client', **changes):
-    return {'client': name, 'segment': 'Public fund', 'service': 'Equities',
-            'observations': [observation('2024', 100, 20), observation('2025', 100, 25)],
-            'value': 'Research', 'benefit': 'HIDDEN BENEFIT', **changes}
-
-
-def observation(period, wallet, capture, currency='CNY'):
-    return {'period': period, 'wallet': {'amount': wallet, 'currency': currency},
-            'capture': {'amount': capture, 'currency': currency}}
-
-
-def company(**changes):
-    return {'id': 'co', 'name': 'Company', 'aliases': ['Alias'], 'clients': [client()],
-            'delivery': [{'section': s, 'entity': 'Entity ' + s, 'type': TYPES[s][0],
-                          'detail': 'Detail ' + s, 'evidence': [{'source': 'test'}]} for s in SECTIONS], **changes}
+from career_job_manager.ui import CareerApp
 
 
 def seed(tmp_path):
     store = CareerStore(tmp_path)
-    store.import_jobs({'jobs': [{'id': 'a', 'company': 'Alias', 'job': 'Analyst', 'service': 'Equities'},
-                                {'id': 'b', 'company': 'Company', 'job': 'Other'},
-                                {'id': 'c', 'company': 'Elsewhere', 'job': 'Analyst'}],
-                       'companies': [company()]})
+    store.import_jobs({'companies': [{'id': 'co', 'name': 'Company', 'aliases': ['Alias'],
+        'strategy': [{'department': 'Small', 'revenue': '$2mn'},
+                     {'department': 'Large', 'revenue': '$1bn'}]}],
+        'jobs': [{'id': 'job', 'company_id': 'co', 'company': 'Company', 'job': 'Analyst'}]})
     return store
 
 
-def test_legacy_combined_unknown_and_roundtrip(tmp_path):
-    store = CareerStore(tmp_path)
-    store.metadata_path.write_text(json.dumps({'applications': [{'id': 'old', 'company': 'Old', 'job': 'Role', 'future': {'a': 1}}], 'future_root': [1]}))
-    assert store.get('old').to_dict()['future'] == {'a': 1}
-    store.update('old', {'job': 'Updated'})
-    assert store.export_data()['future_root'] == [1]
-    store.import_jobs({'companies': [company(future_company={'a': 1})], 'jobs': [], 'other': 2})
-    exported = store.export_data()
-    assert exported['jobs'][0]['future'] == {'a': 1}
-    assert exported['companies'][0]['future_company'] == {'a': 1}
-    other = CareerStore(tmp_path / 'other')
-    other.import_jobs(exported)
-    assert other.export_data()['other'] == 2
-    assert len(other.companies()) == 2
-    assert resolve(other.companies(), name='Old')['clients'] == []
-
-
-def test_identity_alias_and_empty(tmp_path):
+def test_migration_preserves_jobs_identity_metadata_and_new_data(tmp_path):
     store = seed(tmp_path)
-    companies = store.companies()
-    assert len(companies) == 2
-    assert resolve(companies, 'co', 'Elsewhere')['name'] == 'Company'
-    assert resolve(companies, name=' ALIAS ')['id'] == 'co'
-    assert resolve(companies, name='Ｃｏｍｐａｎｙ')['id'] == 'co'
-    assert aggregate(resolve(companies, name='Elsewhere')) == ('0', '-', '-', '-', '-')
+    original = store.export_data()
+    original['research_scope'] = {'keep': [1, 2]}
+    co = original['companies'][0]
+    co.update(evidence=['source'], ownership_bucket='public', research_notes='keep',
+              delivery=[{'entity': 'Old', 'section': 'control'}], value={'obsolete': True})
+    co['clients'] = [{'client': 'Old', 'service': 'Research', 'observations': [{'wallet': 100}]},
+                     {'client': 'New', 'period': '2025', 'engagement': 'Advice', 'role': 'Lead'}]
+    original['companies'].append({'id': 'empty', 'name': 'Empty', 'clients': [
+        {'client': 'Old', 'service': 'Research'}], 'delivery': []})
+    store.metadata_path.write_text(json.dumps(original))
+    migrated = CareerStore(tmp_path)
+    saved = json.loads(migrated.metadata_path.read_text())
+    assert saved['jobs'] == original['jobs']
+    assert saved['research_scope'] == original['research_scope']
+    co = saved['companies'][0]
+    for key in ('id', 'name', 'aliases', 'evidence', 'ownership_bucket', 'research_notes', 'strategy'):
+        assert co[key] == original['companies'][0][key]
+    assert 'value' not in co and 'delivery' not in co
+    assert co['clients'] == [original['companies'][0]['clients'][1]]
+    assert all(saved['companies'][1][t] == [] for t in TABLES)
+    before = migrated.metadata_path.read_bytes(), migrated.metadata_path.stat().st_mtime_ns
+    CareerStore(tmp_path).companies()
+    assert (migrated.metadata_path.read_bytes(), migrated.metadata_path.stat().st_mtime_ns) == before
 
 
-def test_merge_clients_observations_delivery(tmp_path):
+@pytest.mark.parametrize('raw,expected', [
+    ('Alpha·Beta', 'Alpha · Beta'), ('Alpha  ·Beta', 'Alpha · Beta'), ('Alpha ·Beta  · Gamma', 'Alpha · Beta · Gamma'),
+    ('Alpha ·  · Gamma', 'Alpha · Gamma'), ('Alpha · Beta  ·', 'Alpha · Beta'),
+    ('· Alpha', 'Alpha'), (' · · ', '-'), ('', '-'), (None, '-'), ('N/A', '-'),
+    ('Undisclosed', '-'), ('N/D', '-'), ('Unknown', '-'), ('Not disclosed', '-'),
+    ('Revenue +29.6%, PBT +115.3%; Actual / meaning', 'Revenue +29.6%, PBT +115.3%; Actual / meaning'),
+    ('Known · Unknown', 'Known'),
+])
+def test_cell_format(raw, expected):
+    assert cell(raw) == expected
+
+
+def test_order_and_home_derivation():
+    co = {'strategy': [{'department': name, 'revenue': revenue} for name, revenue in
+          [('Missing', None), ('Small', 'HK$ 2mn'), ('Large', 'CNY 1bn'),
+           ('Bad', 'estimate'), ('Largest', '€1.5tn'), ('Equal', 'USD 2m')]],
+          'clients': [{'period': p} for p in ['', '2012–2018', '2025', '2019-2023', None]]}
+    before = deepcopy(co)
+    assert departments(co) == 'Largest · Large · Small · Equal · Missing · Bad'
+    for table in ('makeup', 'direction'):
+        co[table] = deepcopy(co['strategy'])
+        assert ordered_rows(co, table) == ordered_rows(co, 'strategy')
+    assert [r['period'] for r in ordered_rows(co, 'clients')] == ['2025', '2019-2023', '2012–2018', '', None]
+    assert co['strategy'] == before['strategy']
+    assert departments({}) == '-'
+    assert revenue_key('£1b') == revenue_key('£1000m')
+    assert revenue_key('¥1t') == revenue_key('¥1000bn')
+    assert revenue_key('$1k') == revenue_key('$1,000')
+    assert revenue_key('USD $2m') == revenue_key('HK$2mn')
+    assert revenue_key('not 100')[0] is True
+
+
+def test_six_schemas_and_partial_import(tmp_path):
+    assert TABLES == {
+        'strategy': ('Department', 'Revenue', 'Rank', 'Model'),
+        'makeup': ('Department', 'Revenue', 'Scale', 'Mix'),
+        'direction': ('Department', 'Revenue', 'Growth', 'Edge'),
+        'clients': ('Client', 'Period', 'Engagement', 'Role'),
+        'franchise': ('Entity', 'Parent', 'Footprint'),
+        'leadership': ('Layer', 'Parent', 'Composition')}
     store = seed(tmp_path)
-    incoming = company(name='Renamed', clients=[client(observations=[{'period': '2025', 'capture': {'amount': 30, 'currency': 'CNY'}, 'evidence': ['new']}], future=True)],
-                       delivery=[{'section': 'control', 'entity': 'ENTITY CONTROL', 'type': TYPES['control'][0], 'detail': 'New', 'unknown': True}])
-    store.import_jobs({'companies': [incoming]})
-    store.import_jobs({'companies': [incoming]})
-    co = resolve(store.companies(), 'co')
-    assert 'Company' in co['aliases']
-    assert len(co['clients']) == 1
-    row = co['clients'][0]
-    assert len(row['observations']) == 2
-    assert share(row) == .3
-    assert row['benefit'] == 'HIDDEN BENEFIT'
-    assert row['future']
-    assert len(co['delivery']) == 3
-    assert co['delivery'][0]['evidence'] == [{'source': 'test'}]
-    assert co['delivery'][0]['unknown']
+    store.import_jobs({'companies': [{'id': 'co', 'name': 'Company', 'strategy': [
+        {'department': 'Small', 'rank': 'Alpha·Beta', 'evidence': ['keep']}]}]})
+    row = resolve(store.companies(), 'co')['strategy'][0]
+    assert row['revenue'] == '$2mn' and row['rank'] == 'Alpha · Beta'
+    schema = json.loads(Path('schemas/company-intelligence.schema.json').read_text())
+    Draft202012Validator(schema).validate(store.export_data())
+    other = CareerStore(tmp_path / 'roundtrip')
+    other.import_jobs(store.export_data())
+    assert other.export_data()['companies'] == store.export_data()['companies']
 
 
-def test_share_momentum_missing_comparability():
-    row = client()
-    assert share(row) == .25
-    assert momentum(row) == pytest.approx(5)
-    assert display_delta(momentum(row)) == '+5.0pp'
-    for change in ({'wallet': {'amount': 0, 'currency': 'CNY'}},
-                   {'capture': {'amount': None, 'currency': 'CNY'}},
-                   {'capture': {'amount': 10, 'currency': 'USD'}},
-                   {'capture': {'amount': 10, 'currency': 'CNY', 'unit': 'shares'}},
-                   {'capture': {'amount': 10, 'currency': 'CNY', 'service': 'Other'}},
-                   {'capture': {'amount': 10, 'currency': 'CNY', 'period': '2024'}}):
-        bad = client(observations=[{**observation('2025', 100, 25), **change}], momentum='up')
-        assert share(bad) is None
-        assert momentum(bad) == 'up'
-    assert share(client(observations=[observation('2025', 100, 0)])) == 0
-    assert money(None) == '-'
-    assert display_delta(None) == '-'
-    assert momentum(client(observations=[observation('2024', 100, 20, 'USD'), observation('2025', 100, 25)])) is None
-    assert momentum(client(observations=[observation('2024-12', 100, 20), observation('2025', 100, 25)])) is None
-
-
-def test_aggregation():
-    rows = [client('A', segment='Public fund', observations=[observation('2025', 100, 30)]),
-            client('B', segment='Hedge fund', observations=[observation('2025', 100, 22)], value='Access'),
-            client('C', segment='Insurance', observations=[observation('2025', 100, 20)]),
-            client('D', segment='Other', observations=[observation('2025', 100, 28)])]
-    assert aggregate(company(clients=rows)) == ('4', 'Public fund · Hedge fund', '25.0%', '-', 'Research')
-    rows[3]['observations'][0]['capture']['amount'] = 10
-    assert aggregate(company(clients=rows))[1] == 'Public fund · Hedge fund'
-    assert aggregate(company(clients=[client(), client('B', observations=[observation('2025', 100, 50)], momentum='down')]))[3] == '+5.0pp'
-    rows = [client(str(i), observations=[], momentum=m, value=None) for i, m in enumerate(('up', 'up', 'flat'))]
-    assert aggregate(company(clients=rows))[3:] == ('↑', '-')
-    rows.pop()
-    rows[1]['momentum'] = 'down'
-    assert aggregate(company(clients=rows))[3] == '-'
-    rows = [client('same', service='A', segment='Z', observations=[], value='Trust'), client('same', service='B', segment='A', observations=[], value='Access')]
-    assert aggregate(company(clients=rows)) == ('1', 'A · Z', '-', '-', 'Access')
-    rows = [client('A', segment='A', observations=[observation('2025', 100, 50)]), client('B', segment='B', observations=[observation('2025', 100, 50)])]
-    assert aggregate(company(clients=rows))[1] == 'A · B'  # strictly greater than 50%
-    rows[0]['observations'][0]['capture']['amount'] = 60
-    assert aggregate(company(clients=rows))[1] == 'A'
-
-
-def test_matching_priorities():
-    row = client(coverage=['Chips'], geography=['HK'], segment='Fund')
-    jobs = [ApplicationRecord(id='1', company='A', job='Equities', coverage=['Chips']),
-            ApplicationRecord(id='2', company='A', job='Other', service='Equities'),
-            ApplicationRecord(id='3', company='A', job='Other', geography=['HK']),
-            ApplicationRecord(id='4', company='A', job='Other', client_segment='Fund'),
-            ApplicationRecord(id='5', company='A', job='Other', value='Research'),
-            ApplicationRecord(id='6', company='A', job='Equities'),
-            ApplicationRecord(id='7', company='A', job='Nothing')]
-    assert [j.id for j in sorted(jobs, key=lambda j: relevance(j, row))] == ['2', '1', '3', '4', '5', '6', '7']
-    other = dict(row, benefit='Nothing')
-    assert relevance(jobs[-1], row) == relevance(jobs[-1], other)
-
-
-def test_navigation_rendering_edit_delete(tmp_path):
+def test_job_company_entry_defaults_to_strategy(tmp_path):
     async def scenario():
-        store = seed(tmp_path)
-        app = CareerApp(store, initial_root='company')
-        async with app.run_test(size=(150, 35)) as pilot:
-            screen = app.screen
-            assert screen.view == 'company'
-            assert 'CLIENTS' in screen.query_one(CompanyTable).render().plain
-            await pilot.press('enter')
-            assert screen.view == 'company'
-            await pilot.press('right')
-            assert screen.view == 'value'
-            rendered = screen.query_one(CompanyTable).render().plain
-            assert 'CAPTURE' in rendered and '25.0%' in rendered
-            assert 'HIDDEN BENEFIT' not in rendered
-            await pilot.press('d')
-            assert screen.view == 'delivery'
-            rendered = screen.query_one(CompanyTable).render().plain
-            headers = [line for line in rendered.splitlines() if 'ENTITY' in line]
-            assert len(headers) == 3 and len(set(headers)) == 1
-            lines = [line for line in rendered.splitlines() if 'Detail ' in line]
-            assert len({Text(line[:line.index('Detail')]).cell_len for line in lines}) == 1
-            await pilot.press('right', 'right', 'ctrl+a', *'Named Person', 'enter')
-            assert screen.selected()['entity'] == 'Named Person'
-            await pilot.press('down', 'right', 'down', 'right')
-            assert screen.selected()['type'] == 'Largest shareholder'
-            await pilot.press('down', 'right', 'ctrl+a', *'20%', 'enter', 'left')
-            assert screen.selected()['detail'] == '20%'
-            await pilot.press('a', *'New Person', 'enter', 'down', 'right', 'down', 'right', 'left')
-            assert len(resolve(store.companies(), 'co')['delivery']) == 4
-            await pilot.press('d')
-            assert isinstance(app.screen, ConfirmDelete)
-            await pilot.press('n')
-            assert len(resolve(store.companies(), 'co')['delivery']) == 4
-            await pilot.press('d', 'y')
-            assert len(resolve(store.companies(), 'co')['delivery']) == 3
-            await pilot.press('v')
-            assert screen.view == 'value'
-            await pilot.press('j')
-            assert isinstance(app.screen, HomeScreen)
-            jobs = app.screen.query_one(ApplicationList).records
-            assert [j.id for j in jobs] == ['a', 'b']
-            await pilot.press('c')
-            assert app.screen.view == 'value'
-            assert app.screen.company['id'] == 'co'
-            await pilot.press('left')
-            assert app.screen.view == 'company'
-    asyncio.run(scenario())
-
-
-def test_empty_sections_search_space_and_resize(tmp_path):
-    async def scenario():
-        store = CareerStore(tmp_path)
-        store.save_company(company(name='中' * 70, clients=[client('Long client ' * 30)], delivery=[]))
-        app = CareerApp(store, initial_root='company')
-        async with app.run_test(size=(80, 14)) as pilot:
-            screen = app.screen
-            assert '…' in screen.query_one(CompanyTable).render().plain
-            await pilot.press('space')
-            assert 0 in screen.expanded
-            await pilot.press('space', '/', *'missing')
-            assert not screen.rows
-            await pilot.press('escape', 'right', 'space')
-            assert screen.view == 'value' and 0 in screen.expanded
-            assert 'HIDDEN BENEFIT' not in screen.query_one(CompanyTable).render().plain
-            await pilot.resize_terminal(100, 18)
-            await pilot.press('d', 'down', 'a', *'Branch One', 'enter', 'down', 'right', 'down', 'down', 'right', 'left')
-            assert resolve(store.companies(), 'co')['delivery'][0]['section'] == 'operate'
-            await pilot.press('v', 'left')
-            assert screen.view == 'company'
-    asyncio.run(scenario())
-
-
-def test_job_detail_c_and_empty_company(tmp_path):
-    async def scenario():
-        store = CareerStore(tmp_path)
-        store.add(ApplicationRecord(id='job', company='Empty Co', job='Role'))
-        app = CareerApp(store)
+        app = CareerApp(seed(tmp_path))
         async with app.run_test() as pilot:
-            assert isinstance(app.screen, HomeScreen)
-            await pilot.press('right', 'c')
-            assert isinstance(app.screen, CompanyScreen)
-            assert app.screen.view == 'value' and app.screen.rows == []
-    asyncio.run(scenario())
-
-
-def test_launchers_and_shared_import_export(tmp_path, monkeypatch):
-    monkeypatch.setenv('HOME', str(tmp_path))
-    monkeypatch.setattr(cli.platform, 'system', lambda: 'Darwin')
-    launched = []
-    monkeypatch.setattr(CareerApp, 'run', lambda self, **kw: launched.append((self.initial_root, self.store.metadata_path, kw)))
-    cli.main([])
-    cli.company_main([])
-    assert [x[0] for x in launched] == ['job', 'company']
-    assert launched[0][1:] == launched[1][1:]
-    source = tmp_path / 'import.json'
-    source.write_text(json.dumps({'jobs': [], 'companies': [company()]}))
-    cli.company_main(['import', str(source)])
-    out = tmp_path / 'export.json'
-    cli.main(['export', str(out)])
-    assert json.loads(out.read_text())['companies'][0]['id'] == 'co'
-    scripts = tomllib.loads(Path('pyproject.toml').read_text())['project']['scripts']
-    assert scripts['job'] == 'career_job_manager.cli:main'
-    assert scripts['company'] == 'career_job_manager.cli:company_main'
-
-
-def test_unknown_normalized_metadata_and_no_stored_share(tmp_path):
-    store = CareerStore(tmp_path)
-    row = client(share=.99)
-    row['observations'][0]['share'] = .99
-    store.import_jobs({'schema_version': 1, 'jobs': [{'id': 'one', 'company': 'Co', 'role': 'Role',
-        'when': '2026-fall', 'extra': 'future', '_unknown': 'also future',
-        'service': 'Equities', 'coverage': ['Chips'], 'future': {'one': 1}}], 'companies': [company(clients=[row])]})
-    store.import_jobs({'schema_version': 1, 'jobs': [{'id': 'one', 'company': 'Co', 'role': 'Role',
-        'when': '2026-fall', 'future': {'two': 2}, 'coverage': ['Energy']}]})
-    saved = store.list()[0].to_dict()
-    assert saved['future'] == {'one': 1, 'two': 2}
-    assert saved['extra'] == 'future' and saved['_unknown'] == 'also future'
-    assert saved['coverage'] == ['Chips', 'Energy']
-    raw = store.export_data()['companies'][0]['clients'][0]
-    assert 'share' not in raw and all('share' not in o for o in raw['observations'])
-    assert raw['benefit'] == 'HIDDEN BENEFIT'
-
-
-def test_reverse_matching_scroll_and_terminal_default(tmp_path):
-    async def scenario():
-        store = seed(tmp_path)
-        co = resolve(store.companies(), 'co')
-        co['clients'] = [client('Unrelated', service='Other'), client('Match', service='Equities')]
-        co['delivery'] = [{'section': s, 'entity': f'{s} Person {i}', 'type': TYPES[s][0], 'detail': None}
-                          for s in SECTIONS for i in range(10)]
-        store.save_company(co)
-        app = CareerApp(store)
-        async with app.run_test(size=(110, 14)) as pilot:
             await pilot.press('c')
-            screen = app.screen
-            assert screen.rows[0]['client'] == 'Match'
-            await pilot.press('space')
-            assert not screen.expanded  # no physical truncation
-            await pilot.press('d', *(['down'] * 29))
-            await pilot.pause()
-            assert screen.selected()['entity'] == 'source Person 9'
-            strips = app.screen._compositor.render_strips()
-            assert any('source Person 9' in strip.text for strip in strips)
-            for strip in strips:
-                for segment in strip:
-                    if segment.style and segment.style.bgcolor:
-                        assert segment.style.bgcolor.is_default
-            await pilot.press('right', 'right', 'ctrl+a', *'qdvc text', 'enter', 'left')
-            assert screen.selected()['entity'] == 'qdvc text'
+            assert app.screen.view == 'strategy'
+            await pilot.press('escape', 'left', 'right', 'c')
+            assert app.screen.view == 'strategy'
     asyncio.run(scenario())
 
 
-def test_stable_inferred_ids_and_weight_fallback():
-    assert company_union([{'name': 'No ID'}], [])[0]['id'] == company_union([{'name': 'No ID'}], [])[0]['id']
-    rows = [client('A', segment='Fund', value='Research', observations=[observation('2025', 100, 99, 'USD')]),
-            client('B', segment='Insurer', value='Access', observations=[observation('2025', 100, 1, 'CNY')]),
-            client('C', segment='Insurer', value='Access', observations=[observation('2025', 100, 1, 'CNY')])]
-    assert aggregate(company(clients=rows))[1] == 'Insurer'
-    assert aggregate(company(clients=rows))[-1] == 'Access'
-    rows = [client('A', observations=[observation('2025', 100, 80)], value='Research'),
-            client('B', observations=[observation('2025', 100, 10)], value='Access'),
-            client('C', observations=[observation('2025', 100, 10)], value='Access')]
-    assert aggregate(company(clients=rows))[-1] == 'Research'
-    rows[0]['observations'].insert(0, observation('2024', 100, 70))
-    rows[1]['observations'].insert(0, observation('2024', 100, 8))
-    assert aggregate(company(clients=rows))[3] == '+6.0pp'
+@pytest.mark.parametrize('existing_makeup', [False, True])
+def test_composition_migration_preserves_rows_and_is_idempotent(tmp_path, existing_makeup):
+    store = seed(tmp_path)
+    payload = store.export_data()
+    co = payload['companies'][0]
+    legacy = {'id': 'legacy', 'department': 'Markets', 'revenue': '$1bn',
+              'scale': 'Global  ·  Local ·', 'mix': 'Advice', 'evidence': ['source']}
+    co['composition'] = [legacy]
+    current = {'id': 'current', 'department': 'Banking', 'revenue': '-', 'scale': '-', 'mix': '-'}
+    co.pop('makeup', None)
+    if existing_makeup:
+        co['makeup'] = [current]
+    store.metadata_path.write_text(json.dumps(payload))
+    migrated = CareerStore(tmp_path).export_data()
+    expected = {**legacy, 'scale': 'Global · Local'}
+    assert migrated['companies'][0]['makeup'] == ([current] if existing_makeup else []) + [expected]
+    assert 'composition' not in migrated['companies'][0]
+    assert migrated['jobs'] == payload['jobs']
+    before = store.metadata_path.read_bytes(), store.metadata_path.stat().st_mtime_ns
+    CareerStore(tmp_path)
+    assert (store.metadata_path.read_bytes(), store.metadata_path.stat().st_mtime_ns) == before
+    imported = CareerStore(tmp_path / 'imported')
+    imported.import_jobs({'companies': [co]})
+    assert imported.export_data()['companies'][0]['makeup'] == migrated['companies'][0]['makeup']
+
+
+def test_home_groups_only_by_strategy_departments(tmp_path):
+    async def scenario():
+        companies = [
+            {'id': 'z', 'name': 'Zulu', 'strategy': [{'department': 'One'}, {'department': 'Two'}]},
+            {'id': 'b', 'name': 'beta', 'strategy': [{'department': 'One'}]},
+            {'id': 'a', 'name': 'Alpha', 'clients': [{'client': 'Client'}]},
+            {'id': 'd', 'name': 'delta', 'strategy': [{'department': '-'}]},
+            {'id': 'c', 'name': 'Charlie', 'strategy': [{'department': ' ·  · '}]},
+            {'id': 'e', 'name': 'Echo', 'strategy': [{'revenue': '$1bn'}]},
+        ]
+        store = CareerStore(tmp_path)
+        store.import_jobs({'companies': companies, 'jobs': [
+            {'id': c['id'], 'company_id': c['id'], 'company': c['name'], 'job': 'Role'}
+            for c in companies]})
+        app = CareerApp(store, initial_root='company')
+        async with app.run_test() as pilot:
+            screen = app.screen
+            assert [r['name'] for r in screen.rows] == ['beta', 'Zulu', 'Alpha', 'Charlie', 'delta', 'Echo']
+            assert [screen.values(r)[1] for r in screen.rows] == ['One', 'One · Two', '-', '-', '-', '-']
+            await pilot.press('n')
+            assert screen.view == 'company'
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('rank,expected', [(None, 'First · Second'), ('-', 'First · Second'),
+                                         ('First · Second', 'First · Second'),
+                                         ('Current', 'Current · First · Second')])
+def test_position_migration_and_rank_round_trip(tmp_path, rank, expected):
+    store = seed(tmp_path)
+    payload = store.export_data()
+    row = payload['companies'][0]['strategy'][0]
+    row.pop('rank', None)
+    row.update(position='First·Second', evidence=['keep'])
+    if rank is not None:
+        row['rank'] = rank
+    store.metadata_path.write_text(json.dumps(payload))
+    migrated = CareerStore(tmp_path)
+    exported = migrated.export_data()
+    actual = exported['companies'][0]['strategy'][0]
+    assert actual == {**{k: v for k, v in row.items() if k not in ('position', 'rank')}, 'rank': expected}
+    assert exported['jobs'] == payload['jobs']
+    assert 'position' not in migrated.metadata_path.read_text()
+    before = migrated.metadata_path.read_bytes(), migrated.metadata_path.stat().st_mtime_ns
+    CareerStore(tmp_path).export_data()
+    assert (migrated.metadata_path.read_bytes(), migrated.metadata_path.stat().st_mtime_ns) == before
+    imported = CareerStore(tmp_path / 'round-trip')
+    imported.import_jobs(exported)
+    assert imported.export_data()['companies'] == exported['companies']
+    assert 'position' not in imported.metadata_path.read_text()
+    imported.import_jobs({'companies': [{'id': 'co', 'name': 'Company', 'strategy': [
+        {'department': row['department'], 'rank': 'Updated·Rank'}]}]})
+    assert imported.export_data()['companies'][0]['strategy'][0]['rank'] == 'Updated · Rank'
+
+
+def test_legacy_position_import_emits_rank(tmp_path):
+    store = CareerStore(tmp_path)
+    store.import_jobs({'companies': [{'name': 'Company', 'strategy': [
+        {'department': 'Desk', 'position': 'Legacy'}]}]})
+    row = store.export_data()['companies'][0]['strategy'][0]
+    assert row['rank'] == 'Legacy' and 'position' not in row

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Company intelligence import",
-  "description": "Company-only, canonical combined, legacy applications, and normalized version-1 job imports. Unknown fields remain open. Research constraints on Value, Momentum and amounts are intentionally enforced even though the current importer is permissive. Application-level date, duplicate-ID and filesystem checks still apply.",
+  "description": "Six company tables in the existing shared job/company JSON document. Unrelated metadata is preserved.",
   "type": "object",
   "properties": {
     "version": {
@@ -148,180 +148,14 @@
         }
       ]
     },
-    "period": {
-      "type": [
-        "string",
-        "number",
-        "null"
-      ],
-      "description": "Use consistent period strings for research. Numeric periods are also accepted by the implementation; periods are not calendar-parsed."
-    },
-    "amount": {
-      "type": [
-        "object",
-        "null"
-      ],
-      "properties": {
-        "amount": {
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "currency": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "unit": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "units": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "service": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "period": {
-          "$ref": "#/$defs/period"
-        }
-      },
-      "additionalProperties": true,
-      "description": "Partial amount object or unknown. No fields are required. Missing unit/units defaults to currency; unit takes precedence. Numeric validity and comparability determine whether Share can be derived."
-    },
-    "observation": {
-      "type": "object",
-      "properties": {
-        "period": {
-          "$ref": "#/$defs/period"
-        },
-        "wallet": {
-          "$ref": "#/$defs/amount"
-        },
-        "capture": {
-          "$ref": "#/$defs/amount"
-        },
-        "service": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "evidence": {},
-        "share": {
-          "description": "Legacy input accepted but removed on write; do not generate stored Share."
-        }
-      },
-      "additionalProperties": true
-    },
-    "client": {
-      "type": "object",
-      "properties": {
-        "client": {
-          "$ref": "#/$defs/nonblank"
-        },
-        "service": {
-          "$ref": "#/$defs/nonblank"
-        },
-        "segment": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "observations": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/observation"
-          }
-        },
-        "momentum": {
-          "enum": [
-            "up",
-            "flat",
-            "down",
-            null
-          ]
-        },
-        "value": {
-          "$ref": "#/$defs/value"
-        },
-        "benefit": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "coverage": {
-          "$ref": "#/$defs/terms"
-        },
-        "geography": {
-          "$ref": "#/$defs/terms"
-        },
-        "evidence": {},
-        "share": {
-          "description": "Legacy input accepted but removed on write; do not generate stored Share."
-        }
-      },
-      "additionalProperties": true,
-      "required": [
-        "client",
-        "service"
-      ]
-    },
-    "delivery": {
-      "type": "object",
-      "properties": {
-        "section": {
-          "enum": [
-            "control",
-            "operate",
-            "source"
-          ]
-        },
-        "entity": {
-          "$ref": "#/$defs/nonblank"
-        },
-        "type": {
-          "$ref": "#/$defs/nonblank",
-          "description": "Import accepts arbitrary nonblank types. Only the interactive editor restricts choices by section."
-        },
-        "detail": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "entity_kind": {
-          "description": "Preserved extension metadata; no implemented entity-kind vocabulary or type restriction."
-        },
-        "evidence": {}
-      },
-      "additionalProperties": true,
-      "required": [
-        "section",
-        "entity",
-        "type"
-      ]
-    },
     "company": {
       "type": "object",
+      "required": [
+        "name"
+      ],
       "properties": {
         "id": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "$ref": "#/$defs/nonblank"
@@ -332,24 +166,194 @@
             "type": "string"
           }
         },
+        "strategy": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "department": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revenue": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "rank": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "makeup": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "department": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revenue": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scale": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "mix": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "direction": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "department": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "revenue": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "growth": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        },
         "clients": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/client"
+            "type": "object",
+            "properties": {
+              "client": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "period": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "engagement": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
           }
         },
-        "delivery": {
+        "franchise": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/delivery"
+            "type": "object",
+            "properties": {
+              "entity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "footprint": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
           }
         },
-        "evidence": {}
+        "leadership": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "layer": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "parent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "composition": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": true
+          }
+        }
       },
-      "additionalProperties": true,
-      "required": [
-        "name"
-      ]
+      "additionalProperties": true
     },
     "normalizedJob": {
       "type": "object",

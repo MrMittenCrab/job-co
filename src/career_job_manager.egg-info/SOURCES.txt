@@ -3,6 +3,7 @@ pyproject.toml
 src/career_job_manager/__init__.py
 src/career_job_manager/cli.py
 src/career_job_manager/company.py
+src/career_job_manager/company_editing.py
 src/career_job_manager/company_ui.py
 src/career_job_manager/documents.py
 src/career_job_manager/editing.py
@@ -22,13 +23,18 @@ src/career_job_manager.egg-info/requires.txt
 src/career_job_manager.egg-info/top_level.txt
 tests/test_brochure_documents.py
 tests/test_company.py
+tests/test_company_editing.py
+tests/test_company_network.py
 tests/test_documents.py
 tests/test_editing.py
 tests/test_folder_naming.py
 tests/test_form_ux.py
 tests/test_home_regressions.py
 tests/test_import.py
+tests/test_import_reporting.py
+tests/test_live_refresh.py
 tests/test_model.py
+tests/test_navigation_restoration.py
 tests/test_presentation.py
 tests/test_program_brief.py
 tests/test_revision.py
