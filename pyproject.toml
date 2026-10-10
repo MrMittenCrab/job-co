@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "career-job-manager"
 version = "0.6.0"
-description = "Job and Code: JOB and COMPANY terminal applications"
+description = "job&co: JOB and COMPANY terminal applications"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

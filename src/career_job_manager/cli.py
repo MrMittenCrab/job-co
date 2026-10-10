@@ -66,7 +66,7 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
         print(f"Created: {record.company} — {record.job} (deadline {record.deadline})")
         return
     if platform.system() != "Darwin":
-        print("Job and Code is designed for macOS.", file=sys.stderr)
+        print("job&co is designed for macOS.", file=sys.stderr)
         raise SystemExit(2)
     CareerApp(initial_root=initial_root).run(mouse=MOUSE_ENABLED)
 

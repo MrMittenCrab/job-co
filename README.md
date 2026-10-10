@@ -1,4 +1,4 @@
-# Job and Code — JOB / COMPANY
+# job&co — JOB / COMPANY
 
 Repository: https://github.com/MrMittenCrab/job-and-code
 

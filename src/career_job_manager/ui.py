@@ -838,7 +838,7 @@ class ApplicationScreen(Screen[bool]):
 
 
 class CareerApp(App):
-    TITLE = "Job and Code"
+    TITLE = "job&co"
     BINDINGS = [("q", "quit", "Quit")]
     CSS = """
     Screen, ModalScreen {

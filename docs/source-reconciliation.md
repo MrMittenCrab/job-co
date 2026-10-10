@@ -11,7 +11,7 @@ merge. The uncommitted local company intelligence, editing, navigation,
 import reporting, schema, and test changes were retained. No source was
 replaced with the older GitHub version. Local directory, package, module,
 and executable names remain compatible; the repository is named
-[job-and-code](https://github.com/MrMittenCrab/job-and-code).
+[job&co](https://github.com/MrMittenCrab/job-and-code).
 
 Before changes, the complete local checkout (including Git state) and
 `~/Documents/Career/applications.json` were backed up outside the repository
