@@ -18,12 +18,22 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
     subparsers = parser.add_subparsers(dest='command')
     importer = subparsers.add_parser('import', help='Import normalized JSON jobs')
     importer.add_argument('file', type=Path)
+    subparsers.add_parser('migrate', help='Back up and migrate legacy Career data safely')
     exporter = subparsers.add_parser('export', help='Export combined JSON')
     exporter.add_argument('file', type=Path)
     parser.add_argument('-C', '--company', help='company name')
     parser.add_argument('-R', '--role', help='role name')
     parser.add_argument('-D', '--deadline', help='deadline (e.g. 2026-10-01)')
     args = parser.parse_args(argv)
+    if args.command == 'migrate':
+        from .migration import migrate_data
+        try:
+            migrate_data(Path.home() / 'Documents/Career',
+                         Path.home() / 'Documents/Developer/job-and-code/data')
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+        print('Career data migrated; legacy data and backups retained.')
+        return
     if args.command == 'export':
         args.file.write_text(json.dumps(CareerStore().export_data(), ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         return

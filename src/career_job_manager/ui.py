@@ -463,7 +463,19 @@ class HomeScreen(Screen):
 
     def refresh_list(self) -> None:
         search = self.query_one("#search", SearchInput)
-        self.visible_records = filter_records(self.store.list(), search.value)
+        records = self.store.list()
+        self.visible_records = filter_records(records, search.value)
+        if search.value.strip():
+            from .company import resolve
+            companies = self.store.companies()
+            query = search.value.strip().casefold()
+            matching = {record.id for record in self.visible_records}
+            for record in records:
+                employer = resolve(companies, record.company_id, record.company)
+                if employer and any(query in name.casefold()
+                                    for name in [employer['name'], *employer.get('aliases', [])]):
+                    matching.add(record.id)
+            self.visible_records = [record for record in records if record.id in matching]
         if self.company_context:
             from .company import resolve
             companies = self.store.companies()

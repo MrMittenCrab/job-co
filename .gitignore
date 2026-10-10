@@ -3,3 +3,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .DS_Store
+
+data/
+data.backup-*/
+*.egg-info/
+migration-backups/

@@ -55,7 +55,7 @@ The existing homepage date cell displays an exact Deadline when present; otherwi
 Data lives under:
 
 ```text
-~/Documents/Career/
+~/Documents/Developer/job-and-code/data/
 ```
 
 ## Home
@@ -136,7 +136,7 @@ Chosen files are moved into the matching job folder and renamed from Company + J
 Example:
 
 ```text
-~/Documents/Career/Applications/HSBC - Global Banking Graduate/
+~/Documents/Developer/job-and-code/data/Applications/HSBC - Global Banking Graduate/
 ├── HSBC_Global-Banking-Graduate_Resume.docx
 ├── HSBC_Global-Banking-Graduate_Resume_1.docx
 ├── HSBC_Global-Banking-Graduate_Letter.docx
@@ -174,7 +174,7 @@ Machine-readable import schema:
 [schemas/company-intelligence.schema.json](schemas/company-intelligence.schema.json).
 
 `company` opens the company HOME; `job` continues to open JOB. Both use
-`~/Documents/Career/applications.json`, the existing document folders, and the
+`~/Documents/Developer/job-and-code/data/applications.json`, the existing document folders, and the
 same import/export commands. Job records and company/job links are preserved.
 
 Company HOME shows all stored companies, including those without jobs, with
@@ -219,3 +219,5 @@ The Python distribution remains `career-job-manager`, the module remains
 editable installs can keep their local checkout directory name. Updates to that
 checkout take effect on the next launch; processes started before a code update
 need one restart to load the new code. Future data imports refresh automatically.
+
+Run `job migrate` (or `company migrate`) to copy legacy `~/Documents/Career` data. Both roots are backed up under ignored `migration-backups/` before reconciliation. Identical records are retained, disjoint records are combined, and conflicting values or documents stop migration for manual reconciliation. The legacy directory is retained. Re-running does not duplicate records. JOB search includes employer aliases, including CPIC.
