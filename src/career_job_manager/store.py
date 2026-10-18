@@ -25,7 +25,7 @@ class ImportResult(NamedTuple):
 
 class CareerStore:
     def __init__(self, root: Path | None = None) -> None:
-        self.root = (root or Path.home() / "Documents" / "Developer" / "job-and-code" / "data").expanduser()
+        self.root = (root or Path.home() / "Documents" / "Developer" / "job&co" / "data").expanduser()
         self.applications_dir = self.root / "Applications"
         self.metadata_path = self.root / "applications.json"
         self.root.mkdir(parents=True, exist_ok=True)

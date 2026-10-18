@@ -1,3 +1,5 @@
+> Current installation (2026-10-18): all active code and private data live in `~/Documents/Developer/job&co` and its `data/` directory. The private repository is https://github.com/MrMittenCrab/job-co. Both `~/.local/bin/job` and `~/.local/bin/company` resolve to this checkout’s `.venv/bin/`. The Anaconda installation and duplicate `~/bin` launchers were removed. Historical paths below describe the state at the time of this document, not active dependencies. The retained recovery backup is `~/Documents/Developer/job-co-consolidation-backup-20261018-135908/`; older backup directories were consolidated there.
+
 # Career Job Manager V1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

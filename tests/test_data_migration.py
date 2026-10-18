@@ -8,7 +8,7 @@ from career_job_manager.store import CareerStore
 
 def test_default_root(monkeypatch, tmp_path):
     monkeypatch.setattr(Path, 'home', lambda: tmp_path)
-    assert CareerStore().root == tmp_path / 'Documents/Developer/job-and-code/data'
+    assert CareerStore().root == tmp_path / 'Documents/Developer/job&co/data'
 
 
 def test_migration_preserves_raw_metadata_documents_and_is_repeatable(tmp_path):
@@ -55,3 +55,14 @@ def test_document_conflict_does_not_change_metadata_or_files(tmp_path):
         migrate_data(source, target)
     assert (target / 'Applications/document.pdf').read_bytes() == b'new'
     assert (target / 'applications.json').read_bytes() == before
+
+
+def test_cli_migration_requires_explicit_source(monkeypatch, tmp_path):
+    from career_job_manager import cli, migration
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    calls = []
+    monkeypatch.setattr(migration, 'migrate_data', lambda source, target: calls.append((source, target)))
+    cli.main(['migrate', str(tmp_path / 'archive')])
+    assert calls == [(tmp_path / 'archive', tmp_path / 'Documents/Developer/job&co/data')]
+    with pytest.raises(SystemExit):
+        cli.main(['migrate'])

@@ -1,6 +1,6 @@
 # job&co — JOB / COMPANY
 
-Repository: https://github.com/MrMittenCrab/job-and-code
+Repository: https://github.com/MrMittenCrab/job-co
 
 A minimal keyboard-only macOS terminal application for keeping job applications ordered by recruitment timing or their next deadline.
 
@@ -55,7 +55,7 @@ The existing homepage date cell displays an exact Deadline when present; otherwi
 Data lives under:
 
 ```text
-~/Documents/Developer/job-and-code/data/
+~/Documents/Developer/job&co/data/
 ```
 
 ## Home
@@ -136,7 +136,7 @@ Chosen files are moved into the matching job folder and renamed from Company + J
 Example:
 
 ```text
-~/Documents/Developer/job-and-code/data/Applications/HSBC - Global Banking Graduate/
+~/Documents/Developer/job&co/data/Applications/HSBC - Global Banking Graduate/
 ├── HSBC_Global-Banking-Graduate_Resume.docx
 ├── HSBC_Global-Banking-Graduate_Resume_1.docx
 ├── HSBC_Global-Banking-Graduate_Letter.docx
@@ -174,7 +174,7 @@ Machine-readable import schema:
 [schemas/company-intelligence.schema.json](schemas/company-intelligence.schema.json).
 
 `company` opens the company HOME; `job` continues to open JOB. Both use
-`~/Documents/Developer/job-and-code/data/applications.json`, the existing document folders, and the
+`~/Documents/Developer/job&co/data/applications.json`, the existing document folders, and the
 same import/export commands. Job records and company/job links are preserved.
 
 Company HOME shows all stored companies, including those without jobs, with
@@ -220,4 +220,10 @@ editable installs can keep their local checkout directory name. Updates to that
 checkout take effect on the next launch; processes started before a code update
 need one restart to load the new code. Future data imports refresh automatically.
 
-Run `job migrate` (or `company migrate`) to copy legacy `~/Documents/Career` data. Both roots are backed up under ignored `migration-backups/` before reconciliation. Identical records are retained, disjoint records are combined, and conflicting values or documents stop migration for manual reconciliation. The legacy directory is retained. Re-running does not duplicate records. JOB search includes employer aliases, including CPIC.
+Run `job migrate /path/to/source` (or `company migrate /path/to/source`) to copy data from an explicit source directory. Both roots are backed up under ignored `migration-backups/` before reconciliation. Identical records are retained, disjoint records are combined, and conflicting values or documents stop migration for manual reconciliation. The legacy directory is retained. Re-running does not duplicate records. JOB search includes employer aliases, including CPIC.
+
+## Canonical installation
+
+All active code, configuration, and private application data live in `~/Documents/Developer/job&co`. Quote this path in shell commands because it contains `&`. The commands `job` and `company` use this checkout and its `data/` directory.
+
+Unassigned source documents live in ignored `data/Unassigned/`, with a private source-path and SHA-256 manifest. These documents have no inferred application associations. The Python distribution and module names remain unchanged for compatibility.

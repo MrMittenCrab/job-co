@@ -168,12 +168,17 @@ def assert_company_at_top(app, screen):
 
 @pytest.mark.parametrize('key', ['right', 'd'])
 @pytest.mark.parametrize('query', ['', 'Target'])
-def test_company_return_last_row_after_department_update(tmp_path, key, query):
+@pytest.mark.parametrize('already_edited', [False, True])
+def test_company_return_last_row_after_department_update(tmp_path, key, query, already_edited):
     async def scenario():
         store = CareerStore(tmp_path)
         store.import_jobs({'jobs': [
             {'id': str(i), 'company_id': str(i), 'company': f'Target {i:02}', 'job': 'Role'}
             for i in range(35)]})
+        if already_edited:
+            # Keep every profile in the edited group to exercise the last-row boundary.
+            store.import_jobs({'companies': [
+                {'id': str(i), 'name': f'Target {i:02}'} for i in range(35)]})
         app = CareerApp(store, initial_root='company')
         async with app.run_test(size=(100, 14)) as pilot:
             screen = app.screen
@@ -189,13 +194,14 @@ def test_company_return_last_row_after_department_update(tmp_path, key, query):
             await pilot.press('escape')
             await pilot.pause()
             assert screen.selected()['id'] == '34'
-            assert screen.index == 34
+            # Saving a placeholder promotes it; selection follows company identity.
+            assert screen.index == (34 if already_edited else 0)
             assert screen.query_one(SearchInput).value == query
             assert_company_at_top(app, screen)
             position = screen.query_one('#company-scroll').scroll_y
             await pilot.press('down', 'down')
-            assert screen.selected()['id'] == '34'
+            assert screen.selected()['id'] == ('34' if already_edited else '1')
             assert screen.query_one('#company-scroll').scroll_y == position
             await pilot.press('up')
-            assert screen.selected()['id'] == '33'
+            assert screen.selected()['id'] == ('33' if already_edited else '0')
     asyncio.run(scenario())

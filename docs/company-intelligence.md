@@ -1,6 +1,6 @@
 # Company tables
 
-The `company` and `job` launchers share `~/Documents/Career/applications.json`.
+The `company` and `job` launchers share `~/Documents/Developer/job&co/data/applications.json`.
 Company identity (`id`, `name`, `aliases`), company/job links, job records, evidence,
 and unrelated metadata remain in that document. No second database or stored HOME
 summary exists. The document version remains 8; job storage is unchanged.
