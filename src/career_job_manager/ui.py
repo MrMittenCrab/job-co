@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from rich.text import Text
 from rich.style import Style
@@ -29,6 +30,7 @@ from .presentation import (
     visible_form_fields,
 )
 from .store import CareerStore
+from .timing import timing_start
 
 
 def watch_store(screen, refresh_records):
@@ -437,6 +439,7 @@ class HomeScreen(Screen):
         self.client_context = client_context
         self.visible_records: list[ApplicationRecord] = []
         self.opened_record_id: str | None = None
+        self.created_today = date.today()
 
     def compose(self) -> ComposeResult:
         yield Static("APPLICATIONS", id="home-title")
@@ -447,7 +450,23 @@ class HomeScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#search", SearchInput).styles.display = "none"
         self.refresh_list()
-        self.query_one("#applications", ApplicationList).focus()
+        widget = self.query_one("#applications", ApplicationList)
+        # Select once per screen, without changing display order or detail return.
+        for exact in (True, False):
+            candidates = []
+            for index, record in enumerate(self.visible_records):
+                if bool(record.deadline) != exact:
+                    continue
+                day = (date.fromisoformat(record.deadline[:10]) if exact
+                       else timing_start(record.when))
+                if day > self.created_today:
+                    candidates.append((day, index))
+            if candidates:
+                _, widget.selected_index = min(candidates)
+                widget.first_visible = widget.selected_index
+                widget.refresh()
+                break
+        widget.focus()
         watch_store(self, self.refresh_external)
 
     def refresh_external(self) -> bool:
