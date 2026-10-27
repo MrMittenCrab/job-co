@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from career_job_manager import ui
+from career_job_manager import model, ui
 from career_job_manager.store import CareerStore
 from career_job_manager.ui import ApplicationList, CareerApp, HomeScreen
 
@@ -19,6 +19,7 @@ def clock(monkeypatch):
             return cls.current
 
     monkeypatch.setattr(ui, 'date', Clock, raising=False)
+    monkeypatch.setattr(model, 'date', Clock, raising=False)
     return Clock
 
 
@@ -83,4 +84,33 @@ def test_creation_clock_initial_viewport_and_detail_return(tmp_path, clock):
             fresh = app.screen.query_one(ApplicationList)
             assert fresh.selected().id == '25'
             assert fresh.first_visible == min(25, 31 - max(1, fresh.content_size.height - 1))
+    asyncio.run(scenario())
+
+
+def test_expired_wait_appears_after_today_and_is_initially_selected(tmp_path, clock):
+    async def scenario():
+        store = CareerStore(tmp_path)
+        store.import_jobs({'jobs': [
+            {'id': 'old', 'company': 'A', 'job': 'Role',
+             'deadline': '2026-10-01', 'action': 'Apply'},
+            {'id': 'waiting', 'company': 'B', 'job': 'Role',
+             'deadline': '2026-09-15', 'action': 'Wait'},
+            {'id': 'future', 'company': 'C', 'job': 'Role',
+             'deadline': '2026-10-20', 'action': 'Apply'},
+        ]})
+        app = CareerApp(store)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert [r.id for r in app.screen.visible_records] == [
+                'old', 'waiting', 'future',
+            ]
+            assert app.screen.selected_record().id == 'waiting'
+            assert store.get('waiting').deadline == '2026-09-15'
+            clock.current = date(2026, 10, 25)
+            await app.push_screen(HomeScreen(store))
+            await pilot.pause()
+            assert [r.id for r in app.screen.visible_records] == [
+                'old', 'future', 'waiting',
+            ]
+            assert app.screen.selected_record().id == 'waiting'
     asyncio.run(scenario())

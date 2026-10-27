@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
@@ -209,3 +209,34 @@ def test_legacy_records_default_description_text_to_empty():
         "letter": "",
     })
     assert record.description_text == ""
+
+
+def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline():
+    today = date(2026, 10, 27)
+    records = [
+        make_record(id="old", company="A", action="Apply", deadline="2026-10-20"),
+        make_record(id="wait", company="B", action="Wait", deadline="2026-09-01"),
+        make_record(id="next", company="C", action="Apply", deadline="2026-10-29"),
+        make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
+    ]
+    assert [r.id for r in sort_records(records, today=today)] == [
+        "old", "wait", "next", "future-wait",
+    ]
+    assert records[1].deadline == "2026-09-01"
+    records[1].action = "Apply"
+    assert [r.id for r in sort_records(records, today=today)] == [
+        "wait", "old", "next", "future-wait",
+    ]
+
+
+def test_wait_approximate_past_timing_is_pinned_after_today():
+    today = date(2026, 10, 27)
+    records = [
+        make_record(id="old", company="A", when="2026-09", action="Apply"),
+        make_record(id="wait", company="B", when="2026-09", action="Wait"),
+        make_record(id="future", company="C", when="2026-11", action="Apply"),
+    ]
+    assert [r.id for r in sort_records(records, today=today)] == [
+        "old", "wait", "future",
+    ]
+    assert records[1].when == "2026-09"

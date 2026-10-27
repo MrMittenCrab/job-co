@@ -14,7 +14,7 @@ from textual.widgets import Input, Static
 
 from .editing import InlineBuffer, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, filter_records
+from .model import ApplicationRecord, action_uses_target, effective_queue_date, filter_records
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -457,8 +457,7 @@ class HomeScreen(Screen):
             for index, record in enumerate(self.visible_records):
                 if bool(record.deadline) != exact:
                     continue
-                day = (date.fromisoformat(record.deadline[:10]) if exact
-                       else timing_start(record.when))
+                day = effective_queue_date(record, self.created_today)
                 if day > self.created_today:
                     candidates.append((day, index))
             if candidates:
