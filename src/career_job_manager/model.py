@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 import re
 from typing import Iterable
 from . import timing
@@ -227,7 +227,20 @@ def display_deadline(value: str) -> str:
     return month_day
 
 
-def sort_records(records: Iterable[ApplicationRecord]) -> list[ApplicationRecord]:
+def effective_queue_date(record: ApplicationRecord, today: date) -> date:
+    """Schedule Wait after today without changing its stored or displayed deadline."""
+    day = (_parse_deadline(record.deadline).date() if record.deadline
+           else timing.timing_start(record.when or timing.current_season()))
+    if record.action == "Wait" and day <= today:
+        return today + timedelta(days=1)
+    return day
+
+
+def sort_records(
+    records: Iterable[ApplicationRecord], *, today: date | None = None,
+) -> list[ApplicationRecord]:
+    today = today or date.today()
+
     def key(record: ApplicationRecord):
         precision = 0
         if record.deadline:
@@ -239,6 +252,9 @@ def sort_records(records: Iterable[ApplicationRecord]) -> list[ApplicationRecord
                          2 if ".." in when else 3)
             day = timing.timing_start(when)
             start = datetime.combine(day, time.min)
+        effective_day = effective_queue_date(record, today)
+        if start.date() != effective_day:
+            start = datetime.combine(effective_day, time.min)
         # Only Check forms a separate Action group.
         action_priority = record.action == "Check"
         return (action_priority, precision, start, record.company.casefold(), record.job.casefold())
