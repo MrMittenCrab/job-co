@@ -90,6 +90,7 @@ def test_cli_explicit_path(tmp_path, monkeypatch, capsys):
     file = tmp_path / "promotion.json"
     file.write_text(json.dumps(manifest("check", "wait")), encoding="utf-8")
     cli.main(["shortlist", str(file)])
+    assert file.exists()  # An explicitly chosen file outside Downloads is retained.
     assert store.get("check").action == "Apply"
     assert store.get("wait").action == "Wait"
     assert "1 moved Check" in capsys.readouterr().out
@@ -108,6 +109,7 @@ def test_cli_default_download_path(tmp_path, monkeypatch):
     )
     cli.main(["shortlist"])
     assert store.get("check").action == "Apply"
+    assert not (downloads / "jobco-shortlist.json").exists()
 
 
 def test_shortlist_does_not_create_unknown_jobs(tmp_path):
@@ -115,3 +117,88 @@ def test_shortlist_does_not_create_unknown_jobs(tmp_path):
     with pytest.raises(ValueError, match="Unknown shortlist"):
         store.shortlist(manifest("new-role"))
     assert len(store.list()) == 5
+
+
+def test_shortlist_explicit_json_inside_downloads_is_deleted(tmp_path, monkeypatch):
+    from pathlib import Path
+    store = setup_store(tmp_path)
+    monkeypatch.setattr(cli, "CareerStore", lambda: store)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    file = downloads / "special-shortlist.json"
+    file.write_text(json.dumps(manifest("check", "wait")), encoding="utf-8")
+    cli.main(["shortlist", str(file)])
+    assert not file.exists()
+    assert store.get("check").action == "Apply"
+    assert store.get("wait").action == "Wait"
+
+
+def test_shortlist_validation_failure_keeps_downloaded_file(tmp_path, monkeypatch):
+    from pathlib import Path
+    store = setup_store(tmp_path)
+    monkeypatch.setattr(cli, "CareerStore", lambda: store)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    file = downloads / "jobco-shortlist.json"
+    file.write_text(json.dumps(manifest("check", "nonexistent")), encoding="utf-8")
+    before = store.metadata_path.read_bytes()
+    with pytest.raises(SystemExit):
+        cli.main(["shortlist"])
+    assert file.exists()
+    assert store.metadata_path.read_bytes() == before
+
+
+def test_successful_noop_shortlist_still_removes_downloaded_manifest(tmp_path, monkeypatch):
+    from pathlib import Path
+    store = setup_store(tmp_path)
+    monkeypatch.setattr(cli, "CareerStore", lambda: store)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    file = downloads / "jobco-shortlist.json"
+    file.write_text(json.dumps(manifest("apply", "wait")), encoding="utf-8")
+    cli.main(["shortlist"])
+    assert not file.exists()
+    assert store.get("apply").action == "Apply"
+    assert store.get("wait").action == "Wait"
+
+
+def test_shortlist_failed_cleanup_does_not_claim_promotion_failed(tmp_path, monkeypatch, capsys):
+    from pathlib import Path
+    store = setup_store(tmp_path)
+    monkeypatch.setattr(cli, "CareerStore", lambda: store)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    file = downloads / "jobco-shortlist.json"
+    file.write_text(json.dumps(manifest("check")), encoding="utf-8")
+    original_unlink = Path.unlink
+
+    def blocked_unlink(path, *args, **kwargs):
+        if path == file:
+            raise PermissionError("locked")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", blocked_unlink)
+    cli.main(["shortlist"])
+    assert store.get("check").action == "Apply"
+    assert file.exists()
+    output = capsys.readouterr()
+    assert "1 moved Check" in output.out
+    assert "could not remove" in output.err
+
+
+def test_shortlist_keeps_non_json_manifest_even_in_downloads(tmp_path, monkeypatch):
+    from pathlib import Path
+    store = setup_store(tmp_path)
+    monkeypatch.setattr(cli, "CareerStore", lambda: store)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    file = downloads / "manifest.txt"
+    file.write_text(json.dumps(manifest("check")), encoding="utf-8")
+    cli.main(["shortlist", str(file)])
+    assert file.exists()
+    assert store.get("check").action == "Apply"
