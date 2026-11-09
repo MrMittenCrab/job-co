@@ -83,6 +83,21 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
         print(f'Shortlist: {promoted} moved Check → Apply; {unchanged} unchanged.')
+        # This is a single-use transfer manifest, not the weekly export or
+        # database backup. Remove only a JSON located directly in Downloads,
+        # and only once the persisted update has succeeded.
+        downloads = (Path.home() / 'Downloads').resolve()
+        source = args.file.expanduser()
+        if source.suffix.lower() == '.json' and source.resolve().parent == downloads:
+            try:
+                source.unlink()
+            except OSError as exc:
+                # A successful shortlist must not be misreported as failed
+                # just because the optional cleanup could not finish.
+                print(f'Shortlist applied, but could not remove {source}: {exc}',
+                      file=sys.stderr)
+            else:
+                print(f'Removed {source} from Downloads.')
         return
     if args.command == 'import':
         if any(value is not None for value in (args.company, args.role, args.deadline)):
