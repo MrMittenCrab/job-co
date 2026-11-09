@@ -198,6 +198,10 @@ def normalize_deadline(value: str) -> str:
         return ""
     if value.casefold() == "asap":
         raise ValueError("Deadline cannot be ASAP; set Next to ASAP instead.")
+    if value.casefold() == "this month":
+        return date.today().strftime("%Y-%m")
+    if value.casefold() == "this season":
+        return timing.current_season()
     # Existing ISO period syntax is also used by the import 'when' metadata.
     try:
         if timing.timing_precision(value) < 3:
