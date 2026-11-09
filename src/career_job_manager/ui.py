@@ -14,7 +14,7 @@ from textual.widgets import Input, Static
 
 from .editing import InlineBuffer, editor_for_field, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records
+from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records, today_position
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -108,8 +108,10 @@ class ApplicationList(Static):
 
     def render(self) -> Text:
         capacity = max(1, self.content_size.height - 1)
+        # Keep an anchored Today row at the top even near the end of the
+        # list, where fewer than a full screen of future jobs remain.
         self.first_visible = max(0, min(
-            self.first_visible, self.selected_index, len(self.records) - capacity,
+            self.first_visible, self.selected_index, len(self.records) - 1,
         ))
         if self.selected_index >= self.first_visible + capacity:
             self.first_visible = self.selected_index - capacity + 1
@@ -452,12 +454,8 @@ class HomeScreen(Screen):
         self.query_one("#search", SearchInput).styles.display = "none"
         self.refresh_list()
         widget = self.query_one("#applications", ApplicationList)
-        # JOB is ordered entirely by Next, so open on the first actionable
-        # row. Do not jump to a later record using its old Deadline.
-        if self.visible_records:
-            widget.selected_index = 0
-            widget.first_visible = 0
-            widget.refresh()
+        # Sort chronologically, but initially show the present-day boundary.
+        self._jump_today()
         widget.focus()
         watch_store(self, self.refresh_external)
 
@@ -503,21 +501,25 @@ class HomeScreen(Screen):
     def action_move_down(self) -> None:
         self.action_move(1)
 
+    def _jump_today(self) -> None:
+        """Anchor the first today/future action at the viewport's top."""
+        widget = self.query_one("#applications", ApplicationList)
+        index = today_position(self.visible_records, today=date.today())
+        widget.selected_index = index
+        widget.first_visible = index
+        widget.refresh()
+
     def action_today(self) -> None:
-        """Jump to the current top-priority job and clear any active search."""
+        """Return to today's boundary without reordering past actions."""
         search = self.query_one("#search", SearchInput)
-        # A printable t in a focused search input must remain text input.
         if search.has_focus:
-            return
+            return  # 't' is text when typing a search.
         if search.value:
             search.value = ""
             search.styles.display = "none"
             self.refresh_list()
-        widget = self.query_one("#applications", ApplicationList)
-        widget.selected_index = 0
-        widget.first_visible = 0
-        widget.refresh()
-        widget.focus()
+        self._jump_today()
+        self.query_one("#applications", ApplicationList).focus()
 
     def action_move(self, delta: int) -> None:
         if self.query_one("#search", SearchInput).has_focus:
