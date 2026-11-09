@@ -330,14 +330,23 @@ def default_next(record: ApplicationRecord, today: date) -> str:
         except ValueError:
             return sunday.isoformat()  # Unrecognized legacy text: manual review.
         if today < start:
-            return start.isoformat()
+            # Future vague periods are checked at the end of their first
+            # calendar week, rather than on their opening day.
+            return min(end_of_current_week(start), end).isoformat()
         if today <= end:
             return min(sunday, end).isoformat()
         return end.isoformat()
     # 'when' records when recruitment opens, not a confirmed closing date.
     # Once an opportunity has opened it warrants another weekly review.
-    start = timing.timing_start(record.when or timing.season_for_date(today))
-    return (start if start > today else sunday).isoformat()
+    when = record.when or timing.season_for_date(today)
+    start = timing.timing_start(when)
+    if start > today:
+        # Exact opening dates remain exact; vague opening periods get a
+        # checkpoint at the end of their first calendar week.
+        if timing.timing_precision(when) == 3:
+            return start.isoformat()
+        return min(end_of_current_week(start), timing.timing_end(when)).isoformat()
+    return sunday.isoformat()
 
 
 def next_value(record: ApplicationRecord, today: date) -> str:
