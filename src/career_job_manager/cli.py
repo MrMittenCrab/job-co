@@ -19,6 +19,9 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
     subparsers = parser.add_subparsers(dest='command')
     importer = subparsers.add_parser('import', help='Import normalized JSON jobs')
     importer.add_argument('file', type=Path)
+    shortlister = subparsers.add_parser('shortlist', help='Promote shortlisted Check jobs to Apply')
+    shortlister.add_argument('file', type=Path, nargs='?',
+                            default=Path.home() / 'Downloads' / 'jobco-shortlist.json')
     migrator = subparsers.add_parser('migrate', help='Back up and migrate an explicit data directory safely')
     migrator.add_argument('source', type=Path, help='Source directory containing applications.json')
     exporter = subparsers.add_parser('export', help='Export all data or this-week action JSON')
@@ -68,6 +71,18 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
         except OSError as exc:
             parser.error(str(exc))
         print(f'Exported all job&co data to {destination}')
+        return
+    if args.command == 'shortlist':
+        if initial_root != 'job':
+            parser.error('shortlist is a JOB command.')
+        if any(value is not None for value in (args.company, args.role, args.deadline)):
+            parser.error('shortlist cannot be combined with manual creation arguments')
+        try:
+            payload = json.loads(args.file.read_text(encoding='utf-8'))
+            promoted, unchanged = CareerStore().shortlist(payload)
+        except (ValueError, OSError) as exc:
+            parser.error(str(exc))
+        print(f'Shortlist: {promoted} moved Check → Apply; {unchanged} unchanged.')
         return
     if args.command == 'import':
         if any(value is not None for value in (args.company, args.role, args.deadline)):

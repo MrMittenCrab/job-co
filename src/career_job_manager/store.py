@@ -48,6 +48,58 @@ class CareerStore:
                 return record
         raise KeyError(record_id)
 
+    def shortlist(self, payload: object) -> tuple[int, int]:
+        """Promote existing Check records to Apply from an id-only manifest.
+
+        All identifiers are resolved before any modification. No records are
+        created; non-Check Actions and every other field remain unchanged.
+        """
+        if not isinstance(payload, dict) or set(payload) != {"schema_version", "shortlist"}:
+            raise ValueError("Expected only schema_version and shortlist.")
+        if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+            raise ValueError("schema_version must be 1.")
+        requested = payload["shortlist"]
+        if not isinstance(requested, list):
+            raise ValueError("shortlist must be an array of job IDs.")
+        if any(not isinstance(value, str) or not value.strip() or value != value.strip()
+               for value in requested):
+            raise ValueError("Each shortlisted job ID must be a nonblank string.")
+        if len(set(requested)) != len(requested):
+            raise ValueError("Duplicate job ID in shortlist.")
+
+        document = self._document()
+        jobs = document.get("jobs", document.get("applications", []))
+        if not isinstance(jobs, list):
+            raise ValueError("Stored jobs must be an array.")
+        index: dict[str, int] = {}
+        for number, row in enumerate(jobs):
+            if not isinstance(row, dict):
+                raise ValueError("Stored job must be an object.")
+            for key in ("id", "import_id"):
+                identifier = row.get(key)
+                if not identifier:
+                    continue
+                if not isinstance(identifier, str):
+                    raise ValueError("Stored job identifiers must be strings.")
+                if identifier in index and index[identifier] != number:
+                    raise ValueError(f"Ambiguous job ID: {identifier}")
+                index[identifier] = number
+
+        unknown = [identifier for identifier in requested if identifier not in index]
+        if unknown:
+            raise ValueError("Unknown shortlist job ID(s): " + ", ".join(unknown))
+
+        selected = {index[identifier] for identifier in requested}
+        promoted = 0
+        for number in selected:
+            if jobs[number].get("action") == "Check":
+                jobs[number]["action"] = "Apply"
+                promoted += 1
+        if promoted:
+            # One atomic write, only after validating every requested ID.
+            self._write(document)
+        return promoted, len(selected) - promoted
+
     def import_jobs(self, payload: object) -> ImportResult:
         if not isinstance(payload, dict):
             raise ValueError('Expected a JSON object.')

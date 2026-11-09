@@ -83,6 +83,28 @@ The export captures non-archived jobs whose **effective Next** is `ASAP`, today 
 
 The file is a **read-only agenda**, not a normalized import or database backup. Its top-level keys are `format`, `as_of`, `week_ending`, and `items`. It never changes existing records. To export the full backup database as before, use `job export "$HOME/Downloads/jobco-all.json"`.
 
+## Shortlist existing jobs (Check → Apply)
+
+The weekly export and shortlist are **different** operations. Keep `job import` for creating/updating factual job information. Use **`job shortlist`** for safely promoting an AI-reviewed list of *existing* jobs from `Check` to `Apply`. It does not create records, update vacancies, or rewrite the employer's application deadline, Next, documents, notes, or portal.
+
+1. Export the current worklist with `job export this-week`.
+2. Share `~/Downloads/jobco-this-week-YYYY-MM-DD.json` for vacancy verification and triage. Receive a shortlist manifest named **`jobco-shortlist.json`**.
+3. Save that file in Downloads and run:
+
+```bash
+job shortlist
+```
+
+The manifest is intentionally just IDs taken from the weekly export's `items[].id` (or matching `import_id`), and nothing more:
+
+```json
+{"schema_version": 1, "shortlist": ["existing-job-id-1", "existing-job-id-2"]}
+```
+
+`job shortlist` reads `$HOME/Downloads/jobco-shortlist.json` by default. To use another path: `job shortlist "$HOME/Downloads/other-shortlist.json"`. It promotes matching records **only if Action is currently Check**. Apply, Wait, Take, Go, Respond, Email and Archive are left unchanged, and re-running the same file is safe. Unknown, duplicate or ambiguous IDs and malformed files abort before any promotion; no new jobs are created. Results report promoted and unchanged counts. If several IDs in the input resolve to the same existing job, it is promoted only once.
+
+This is a **state-change manifest**, not an import JSON or a weekly export. Its identifiers come from the local export; never invent IDs from company/job names. Keep the research shortlist separate from `job shortlist` itself: only confirmed and eligible openings should go in the manifest.
+
 ## Home
 
 ```text
