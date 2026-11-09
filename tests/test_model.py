@@ -98,7 +98,7 @@ def test_sort_records_uses_deadline_and_season_for_undated():
         make_record(id="b", company="HSBC", deadline="2026-09-20 18:00"),
         make_record(id="a", company="P&G", deadline="2026-09-18 23:59"),
     ]
-    assert [record.id for record in sort_records(records)] == ["a", "b", "c"]
+    assert [record.id for record in sort_records(records, today=date(2026, 11, 9))] == ["c", "a", "b"]
 
 
 @pytest.mark.parametrize("action", ["Apply", "Wait", "Take", "Go", "Respond", "Email"])
@@ -125,7 +125,9 @@ def test_action_groups_preserve_exact_then_fuzzy_time_order(action):
         make_record(id="late", action=action, deadline="2026-10-01"),
         make_record(id="early", action=action, deadline="2026-09-01"),
     ]
-    assert [record.id for record in sort_records(records)] == ["early", "late", "fuzzy"]
+    expected = (["fuzzy", "early", "late"] if action in {"Apply", "Check"}
+                else ["early", "late", "fuzzy"])
+    assert [record.id for record in sort_records(records, today=date(2026, 11, 9))] == expected
 
 
 def test_filter_records_searches_company_job_action_contact_and_keeps_order():
@@ -258,8 +260,8 @@ def test_fortnight_deadlines_precede_existing_action_groups():
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
         "urgent-wait", "urgent-take", "urgent-check", "urgent-apply",
-        "last-day", "archived", "far-apply", "overdue-check",
-        "later-check", "no-deadline-check",
+        "last-day", "no-deadline-check", "archived", "far-apply",
+        "overdue-check", "later-check",
     ]
 
 
@@ -274,3 +276,38 @@ def test_fortnight_window_is_inclusive_and_requires_confirmed_deadline():
     assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-08"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Check", when="2026-11"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Archive", deadline="2026-11-11"), today)
+
+
+def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_else():
+    today = date(2026, 11, 9)
+    records = [
+        make_record(id="future-start", company="Future", action="Check", when="2026-12"),
+        make_record(id="older", company="Older", action="Check", when="2026-09-01"),
+        make_record(id="newer-check", company="NewCheck", action="Check", when="2026-11-06"),
+        make_record(id="newer-apply", company="NewApply", action="Apply", when="2026-11-06"),
+        make_record(id="approx", company="Approx", action="Apply", when="2026-11"),
+        make_record(id="far-deadline", company="Far", action="Apply", deadline="2026-12-03"),
+        make_record(id="urgent", company="Urgent", action="Take", deadline="2026-11-20"),
+        make_record(id="archived-undated", company="Archived", action="Archive", when="2026-11-07"),
+        make_record(id="undated-wait", company="Wait", action="Wait", when="2026-11-05"),
+    ]
+    assert [r.id for r in sort_records(records, today=today)] == [
+        "urgent", "newer-apply", "newer-check", "approx", "older",
+        "archived-undated", "undated-wait", "far-deadline", "future-start",
+    ]
+
+
+def test_undated_application_priority_never_creates_or_infers_deadlines():
+    from career_job_manager.model import undated_application_needing_review
+    today = date(2026, 11, 9)
+    record = make_record(action="Check", when="2026-11-03")
+    assert undated_application_needing_review(record, today)
+    assert record.deadline == ""
+    assert not undated_application_needing_review(
+        make_record(action="Check", when="2026-12"), today)
+    assert not undated_application_needing_review(
+        make_record(action="Archive", when="2026-11-03"), today)
+    assert not undated_application_needing_review(
+        make_record(action="Take", when="2026-11-03"), today)
+    assert not undated_application_needing_review(
+        make_record(action="Apply", when="2026-11-03", deadline="2026-12-31"), today)
