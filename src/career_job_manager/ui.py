@@ -451,30 +451,12 @@ class HomeScreen(Screen):
         self.query_one("#search", SearchInput).styles.display = "none"
         self.refresh_list()
         widget = self.query_one("#applications", ApplicationList)
-        # Start at the first actionable priority: a near deadline, or an
-        # undated Apply/Check record that needs prompt vacancy verification.
-        if self.visible_records and (
-            deadline_due_within_two_weeks(self.visible_records[0], self.created_today)
-            or undated_application_needing_review(self.visible_records[0], self.created_today)
-        ):
+        # JOB is ordered entirely by Next, so open on the first actionable
+        # row. Do not jump to a later record using its old Deadline.
+        if self.visible_records:
             widget.selected_index = 0
             widget.first_visible = 0
             widget.refresh()
-        else:
-            # Retain the previous nearest-upcoming selection when no urgent job exists.
-            for exact in (True, False):
-                candidates = []
-                for index, record in enumerate(self.visible_records):
-                    if bool(record.deadline) != exact:
-                        continue
-                    day = effective_queue_date(record, self.created_today)
-                    if day > self.created_today:
-                        candidates.append((day, index))
-                if candidates:
-                    _, widget.selected_index = min(candidates)
-                    widget.first_visible = widget.selected_index
-                    widget.refresh()
-                    break
         widget.focus()
         watch_store(self, self.refresh_external)
 
