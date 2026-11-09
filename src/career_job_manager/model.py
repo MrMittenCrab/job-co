@@ -244,6 +244,16 @@ def deadline_due_within_two_weeks(record: ApplicationRecord, today: date) -> boo
     return today <= deadline_date <= today + timedelta(days=14)
 
 
+def undated_application_needing_review(record: ApplicationRecord, today: date) -> bool:
+    """Unsubmitted job with no exact deadline and recruitment timing already started.
+
+    Timing is a queue heuristic, not proof the vacancy is still accepting applications.
+    """
+    if record.action not in {"Apply", "Check"} or record.deadline:
+        return False
+    return timing.timing_start(record.when or timing.current_season()) <= today
+
+
 def sort_records(
     records: Iterable[ApplicationRecord], *, today: date | None = None,
 ) -> list[ApplicationRecord]:
@@ -263,13 +273,20 @@ def sort_records(
         effective_day = effective_queue_date(record, today)
         if start.date() != effective_day:
             start = datetime.combine(effective_day, time.min)
-        # Confirmed non-archived deadlines from today through day 14 take
-        # priority, regardless of Action. All other records retain old order.
+        # 1: Confirmed non-archived deadlines due in the next 14 days.
         if deadline_due_within_two_weeks(record, today):
-            return (0, 0, 0, _parse_deadline(record.deadline),
+            return (0, _parse_deadline(record.deadline), 0, 0,
                     record.company.casefold(), record.job.casefold())
+        # 2: Unsubmitted applications with no confirmed deadline. Surface
+        # recently recorded recruitment timing first; never infer a deadline.
+        if undated_application_needing_review(record, today):
+            when = record.when or timing.current_season()
+            return (1, -timing.timing_start(when).toordinal(),
+                    -timing.timing_precision(when), record.action == "Check",
+                    record.company.casefold(), record.job.casefold())
+        # 3: Everyone else retains the established Action/precision/date order.
         action_priority = record.action == "Check"
-        return (1, action_priority, precision, start, record.company.casefold(), record.job.casefold())
+        return (2, action_priority, precision, start, record.company.casefold(), record.job.casefold())
 
     return sorted(records, key=key)
 
