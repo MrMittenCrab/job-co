@@ -49,10 +49,44 @@ def test_recruitment_opening_timing_without_closing_date_reviews_weekly():
 
 def test_stage_actions_default_to_week_end_not_original_application_cutoff():
     today = date(2026, 11, 9)
-    for action in ("Wait", "Take", "Go", "Respond", "Email"):
+    for action in ("Take", "Go", "Respond", "Email"):
         app = record(action=action, deadline="2026-11-13")
         assert default_next(app, today) == "2026-11-15"
         assert app.deadline == "2026-11-13"
+
+
+def test_wait_uses_original_application_cutoff_as_next_until_user_overrides():
+    today = date(2026, 11, 9)
+    app = record(action="Wait", deadline="2026-12-31 23:59")
+    assert default_next(app, today) == "2026-12-31 23:59"
+    assert next_value(app, today) == "2026-12-31 23:59"
+    app.next = "2026-11-15"
+    assert next_value(app, today) == "2026-11-15"
+    assert app.deadline == "2026-12-31 23:59"
+
+
+def test_wait_after_application_cutoff_requires_review_not_archive():
+    from career_job_manager.model import effective_queue_date
+
+    today = date(2027, 1, 4)
+    wait = record("wait", action="Wait", deadline="2026-12-31")
+    fresh = record("fresh", action="Check", deadline="2027-spring")
+    assert default_next(wait, today) == "2026-12-31"
+    assert wait.action == "Wait"
+    assert effective_queue_date(wait, today) == date(2027, 1, 5)
+    assert [r.id for r in sort_records([fresh, wait], today=today)] == ["wait", "fresh"]
+
+
+def test_wait_vague_future_and_current_deadlines_follow_period_checkpoints():
+    assert default_next(
+        record(action="Wait", deadline="2027-spring"), date(2026, 11, 9),
+    ) == "2027-03-07"
+    assert default_next(
+        record(action="Wait", deadline="2027-spring"), date(2027, 3, 10),
+    ) == "2027-03-14"
+    assert default_next(
+        record(action="Wait", deadline=""), date(2026, 11, 9),
+    ) == "2026-11-15"
 
 
 def test_asap_only_for_next_and_sorting_uses_next_date():
