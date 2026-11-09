@@ -106,7 +106,7 @@ HSBC — Global Banking Graduate
                advisory work. Full text wraps below.
 ```
 
-Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Ctrl+A selects the entire text field; Backspace or Delete clears the selection. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
+**Action is the first field** on every job detail and ADD screen, and receives initial focus. Text fields enter editing with the existing field value selected: paste or type to replace the value, or press Backspace/Delete to clear it. Press Left/Right before typing to cancel the selection and edit individual characters. Ctrl+A while editing selects only the current text field; macOS Command+A may instead select terminal text depending on the terminal application. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
 
 On Action, Right opens the existing dropdown. Up/Down move the highlight; Left or Right commits the highlighted option and closes the dropdown. Enter commits the highlighted option and closes the dropdown; press Enter again to save and return home. Actions are Apply, Wait, Take, Go, Respond, Archive, Email, and Check. Manual applications default to Apply; JSON imports start at Check.
 
