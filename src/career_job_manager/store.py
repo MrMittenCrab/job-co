@@ -49,13 +49,13 @@ class CareerStore:
                 return record
         raise KeyError(record_id)
 
-    def shortlist(self, payload: object, *, today: date | None = None) -> tuple[int, int]:
-        """Promote existing Check records to Apply, scheduling them this week.
+    def shortlist(self, payload: object, *, today: date | None = None) -> tuple[int, int, int]:
+        """Activate shortlisted Check/Apply jobs and schedule them this week.
 
-        Validate every ID before mutation; leave other Actions intact.
-        Set Next to this week's Sunday unless an earlier application cutoff
-        applies. Preserve an intentional ASAP Next as an explicit override.
+        Check -> Apply; already-Apply records are also scheduled for Sunday.
+        All other Actions and ASAP Next values remain unchanged.
         """
+
         today = today or date.today()
         sunday = end_of_current_week(today)
         if not isinstance(payload, dict) or set(payload) != {"schema_version", "shortlist"}:
@@ -94,14 +94,17 @@ class CareerStore:
             raise ValueError("Unknown shortlist job ID(s): " + ", ".join(unknown))
 
         selected = {index[identifier] for identifier in requested}
-        promoted = 0
+        promoted = rescheduled = untouched = 0
         for number in selected:
             row = jobs[number]
-            if row.get("action") != "Check":
+            old_action = row.get("action")
+            if old_action not in {"Check", "Apply"}:
+                untouched += 1
                 continue
 
-            # The shortlist is a conscious decision to apply this week,
-            # not a revision of the employer's application deadline.
+            # A shortlist is a deliberate this-week application decision,
+            # whether the job was already Apply or was promoted from Check.
+            # Do not change the original application Deadline.
             next_due = sunday.isoformat()
             cutoff = row.get("deadline", "")
             exact = _parse_deadline_or_none(cutoff)
@@ -118,14 +121,19 @@ class CareerStore:
                         # An expired vague application period keeps its
                         # original first-week Sunday in the past.
                         next_due = min(end_of_current_week(start), end).isoformat()
-            row["action"] = "Apply"
-            if str(row.get("next", "")).upper() != "ASAP":
+            if old_action == "Check":
+                row["action"] = "Apply"
+                promoted += 1
+            if str(row.get("next", "")).upper() != "ASAP" and row.get("next") != next_due:
                 row["next"] = next_due
-            promoted += 1
-        if promoted:
+                if old_action == "Apply":
+                    rescheduled += 1
+            elif old_action == "Apply":
+                untouched += 1
+        if promoted or rescheduled:
             # One atomic write, only after validating every requested ID.
             self._write(document)
-        return promoted, len(selected) - promoted
+        return promoted, rescheduled, untouched
 
     def import_jobs(self, payload: object) -> ImportResult:
         if not isinstance(payload, dict):
