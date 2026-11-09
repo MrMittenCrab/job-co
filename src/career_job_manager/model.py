@@ -205,7 +205,7 @@ def normalize_deadline(value: str) -> str:
             return value
     except ValueError:
         pass
-    season = re.fullmatch(r"(?i)(spring|summer|fall|autumn|winter)(?: (20\\d{2}))?", value)
+    season = re.fullmatch(r"(?i)(spring|summer|fall|autumn|winter)(?: (20\d{2}))?", value)
     if season:
         year = int(season[2]) if season[2] else date.today().year
         season_name = "fall" if season[1].casefold() == "autumn" else season[1].casefold()
@@ -297,7 +297,7 @@ def end_of_current_week(today: date) -> date:
 
 
 def _season_end(today: date) -> date:
-    return timing.timing_end(timing.current_season(today))
+    return timing.timing_end(timing.season_for_date(today))
 
 
 def default_next(record: ApplicationRecord, today: date) -> str:
@@ -332,7 +332,7 @@ def default_next(record: ApplicationRecord, today: date) -> str:
         return end.isoformat()
     # 'when' records when recruitment opens, not a confirmed closing date.
     # Once an opportunity has opened it warrants another weekly review.
-    start = timing.timing_start(record.when or timing.current_season(today))
+    start = timing.timing_start(record.when or timing.season_for_date(today))
     return (start if start > today else sunday).isoformat()
 
 
@@ -366,7 +366,7 @@ def undated_application_needing_review(record: ApplicationRecord, today: date) -
         return False
     if _parse_deadline_or_none(record.deadline):
         return False
-    return timing.timing_start(record.when or timing.current_season(today)) <= today
+    return timing.timing_start(record.when or timing.season_for_date(today)) <= today
 
 
 def sort_records(records: Iterable[ApplicationRecord], *, today: date | None = None
