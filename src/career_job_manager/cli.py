@@ -98,10 +98,11 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
             parser.error('shortlist cannot be combined with manual creation arguments')
         try:
             payload = json.loads(args.file.read_text(encoding='utf-8'))
-            promoted, unchanged = CareerStore().shortlist(payload)
+            promoted, rescheduled, unchanged = CareerStore().shortlist(payload)
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
-        print(f'Shortlist: {promoted} moved Check → Apply; {unchanged} unchanged.')
+        print(f'Shortlist: {promoted} moved Check → Apply; '
+              f'{rescheduled} existing Apply rescheduled; {unchanged} unchanged.')
         _cleanup_consumed_download_json(args.file)
         return
     if args.command == 'import':
