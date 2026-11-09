@@ -89,12 +89,16 @@ class ApplicationRecord:
         if not self.deadline and not self.when:
             self.when = timing.current_season()
 
-    def validate(self, *, preserve_action: bool = False) -> None:
+    def validate(self, *, preserve_action: bool = False,
+                 preserve_legacy_deadline: bool = False) -> None:
         self.company = self.company.strip()
         self.job = self.job.strip()
         if not preserve_action:
             self.action = self.action.strip()
-        self.deadline = normalize_deadline(self.deadline)
+        # The store may preserve an unchanged historical "ASAP" deadline,
+        # but new or edited deadlines must be real dates.
+        if not preserve_legacy_deadline:
+            self.deadline = normalize_deadline(self.deadline)
         self.target = self.target.strip()
         self.portal = self.portal.strip()
         self.contact = self.contact.strip()
