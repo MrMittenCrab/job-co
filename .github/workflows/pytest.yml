@@ -6,14 +6,26 @@ on:
     branches: [main]
 
 jobs:
-  pytest:
+  unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install package and test dependencies
-        run: python -m pip install -e ".[dev]"
-      - name: Run tests
-        run: python -m pytest -q
+      - run: python -m pip install -e ".[dev]"
+      - name: Fast model and storage tests
+        run: python -m pytest -q -x tests/test_next_deadline.py tests/test_model.py tests/test_store.py tests/test_presentation.py tests/test_editing.py
+
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install -e ".[dev]"
+      - name: All tests
+        run: python -m pytest -q -x
