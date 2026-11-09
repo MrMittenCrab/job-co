@@ -14,7 +14,7 @@ from textual.widgets import Input, Static
 
 from .editing import InlineBuffer, editor_for_field, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records
+from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -624,6 +624,7 @@ class ApplicationScreen(Screen[bool]):
         self.store = store
         self.record_id = record_id
         self.record = store.get(record_id) if record_id else None
+        self._auto_next = not bool(self.record and self.record.next)
         self.values = self._initial_values()
 
     @property
@@ -632,10 +633,12 @@ class ApplicationScreen(Screen[bool]):
 
     def _initial_values(self) -> dict[str, str]:
         record = self.record
+        initial = record or ApplicationRecord(id="", company="", job="")
         return {
             "Company": record.company if record else "",
             "Job": record.job if record else "",
             "Deadline": record.deadline if record else "",
+            "Next": record.next if record and record.next else default_next(initial, date.today()),
             "Action": record.action if record else "Apply",
             "Target": record.target if record else "",
             "Brief": record.brief if record else "",
@@ -772,9 +775,29 @@ class ApplicationScreen(Screen[bool]):
         else:
             self.action_activate_field()
 
+    def _refresh_auto_next(self) -> None:
+        if not self._auto_next:
+            return
+        temp = ApplicationRecord(
+            id="", company=self.values["Company"], job=self.values["Job"],
+            action=self.values["Action"], deadline=self.values["Deadline"],
+            when=self.record.when if self.record else "",
+        )
+        self.values["Next"] = default_next(temp, date.today())
+        self._row("Next").set_value(self.values["Next"])
+
     def finish_inline_edit(self, field: str, value: str) -> None:
+        old = self.values[field]
         self.values[field] = value
         self._row(field).set_value(value)
+        if field == "Next":
+            if not value.strip():
+                self._auto_next = True
+                self._refresh_auto_next()
+            elif not self._auto_next or value != old:
+                self._auto_next = False
+        elif field == "Deadline" and self._auto_next:
+            self._refresh_auto_next()
         if field in {"Company", "Job"} and self.existing:
             company = self.values["Company"].strip() or self.record.company
             job = self.values["Job"].strip() or self.record.job
@@ -783,10 +806,16 @@ class ApplicationScreen(Screen[bool]):
     def _after_choice(self, field: str, value: str | None) -> None:
         if value is None:
             return
+        old = self.values[field]
         self.values[field] = value
         self._row(field).set_value(value)
         if field == "Action":
             self._sync_target_visibility()
+            if value != old:
+                # A new stage needs a new Next; never carry its old reminder
+                # or mutate the original application Deadline.
+                self._auto_next = True
+                self._refresh_auto_next()
 
     def _view_document(self, field: str) -> None:
         name = getattr(self.record, field.lower(), "") if self.record else ""
@@ -826,6 +855,7 @@ class ApplicationScreen(Screen[bool]):
             "company": self.values["Company"],
             "job": self.values["Job"],
             "deadline": self.values["Deadline"],
+            "next": "" if self._auto_next else self.values["Next"],
             "action": action,
             "target": self.values["Target"] if action_uses_target(action) else "",
             "brief": self.values["Brief"],
