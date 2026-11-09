@@ -311,3 +311,35 @@ def test_undated_application_priority_never_creates_or_infers_deadlines():
         make_record(action="Take", when="2026-11-03"), today)
     assert not undated_application_needing_review(
         make_record(action="Apply", when="2026-11-03", deadline="2026-12-31"), today)
+
+
+def test_legacy_nondatetime_deadline_does_not_crash_queue():
+    # Historical imports sometimes used "ASAP" in the Deadline column.
+    today = date(2026, 11, 9)
+    invalid = make_record(id="asap", company="JPMAM", job="Research", action="Wait",
+                          deadline="ASAP", when="2026-fall")
+    urgent = make_record(id="urgent", company="Orbis", action="Check",
+                         deadline="2026-11-14", when="2026-10")
+    assert [r.id for r in sort_records([invalid, urgent], today=today)] == [
+        "urgent", "asap",
+    ]
+    assert display_deadline("ASAP") == "ASAP"
+    assert invalid.deadline == "ASAP"  # Original metadata is preserved.
+
+
+def test_invalid_legacy_deadline_is_not_treated_as_confirmed_urgency():
+    from career_job_manager.model import (
+        deadline_due_within_two_weeks, undated_application_needing_review,
+        effective_queue_date,
+    )
+    today = date(2026, 11, 9)
+    invalid = make_record(action="Check", deadline="ASAP", when="2026-11")
+    assert not deadline_due_within_two_weeks(invalid, today)
+    assert undated_application_needing_review(invalid, today)
+    assert effective_queue_date(invalid, today) == date(2026, 11, 1)
+    assert [r.id for r in filter_records([invalid], "HSBC")] == ["1"]
+
+
+def test_new_nondatetime_deadlines_still_fail_strict_validation():
+    with pytest.raises(ValueError, match="Deadline examples"):
+        make_record(deadline="ASAP").validate()
