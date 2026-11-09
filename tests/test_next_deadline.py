@@ -38,13 +38,13 @@ def test_weekly_default_never_exceeds_earlier_application_deadline():
     assert default_next(record(deadline="2026-11-13"), today) == "2026-11-13"
     assert default_next(record(deadline="2026-11-09"), today) == "2026-11-09"
     assert default_next(record(deadline="2026-12-01"), today) == "2026-12-01"
-    assert default_next(record(deadline="2026-winter"), today) == "2026-12-01"
+    assert default_next(record(deadline="2026-winter"), today) == "2026-12-06"
 
 
 def test_recruitment_opening_timing_without_closing_date_reviews_weekly():
     today = date(2026, 11, 9)
     assert default_next(record(when="2026-09", deadline=""), today) == "2026-11-15"
-    assert default_next(record(when="2026-12", deadline=""), today) == "2026-12-01"
+    assert default_next(record(when="2026-12", deadline=""), today) == "2026-12-06"
 
 
 def test_stage_actions_default_to_week_end_not_original_application_cutoff():
@@ -110,3 +110,43 @@ def test_manual_edit_can_clear_next_to_restore_auto_weekly_default(tmp_path):
     updated = store.update("manual", {"next": ""})
     assert updated.next == ""
     assert default_next(updated, date(2026, 11, 9)) == "2026-11-15"
+
+
+@pytest.mark.parametrize(("period", "today", "expected"), [
+    ("2027-spring", date(2026, 11, 9), "2027-03-07"),
+    ("2027-spring", date(2027, 3, 1), "2027-03-07"),
+    ("2027-spring", date(2027, 3, 10), "2027-03-14"),
+    ("2027-spring", date(2027, 3, 17), "2027-03-21"),
+    ("2027-spring", date(2027, 5, 30), "2027-05-30"),
+    ("2027-10", date(2026, 11, 9), "2027-10-03"),
+    ("2027-10", date(2027, 10, 5), "2027-10-10"),
+    ("2027-10..2027-12", date(2026, 11, 9), "2027-10-03"),
+    ("2026-winter", date(2026, 11, 9), "2026-12-06"),
+    ("2026-winter", date(2027, 1, 11), "2027-01-17"),
+])
+def test_future_and_active_vague_deadline_uses_correct_week_end(period, today, expected):
+    app = record(deadline=period)
+    assert default_next(app, today) == expected
+    assert app.deadline == period  # A generated Next never rewrites Deadline.
+    assert app.next == ""
+
+
+@pytest.mark.parametrize(("opening", "today", "expected"), [
+    ("2027-spring", date(2026, 11, 9), "2027-03-07"),
+    ("2027-spring", date(2027, 3, 10), "2027-03-14"),
+    ("2027-10", date(2026, 11, 9), "2027-10-03"),
+    ("2027-10..2027-12", date(2026, 11, 9), "2027-10-03"),
+    ("2027-03-01", date(2026, 11, 9), "2027-03-01"),
+])
+def test_future_vague_recruitment_opening_uses_first_sunday_but_exact_is_unchanged(
+    opening, today, expected,
+):
+    app = record(deadline="", when=opening)
+    assert default_next(app, today) == expected
+    assert app.next == ""
+
+
+def test_manually_set_next_never_rolls_with_future_vague_deadline():
+    app = record(deadline="2027-spring", next="2027-04-12")
+    assert next_value(app, date(2026, 11, 9)) == "2027-04-12"
+    assert next_value(app, date(2027, 3, 17)) == "2027-04-12"
