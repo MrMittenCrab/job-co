@@ -220,12 +220,12 @@ def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline()
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "old", "wait", "next", "future-wait",
+        "next", "old", "wait", "future-wait",
     ]
     assert records[1].deadline == "2026-09-01"
     records[1].action = "Apply"
     assert [r.id for r in sort_records(records, today=today)] == [
-        "wait", "old", "next", "future-wait",
+        "next", "wait", "old", "future-wait",
     ]
 
 
@@ -240,3 +240,32 @@ def test_wait_approximate_past_timing_is_pinned_after_today():
         "old", "wait", "future",
     ]
     assert records[1].when == "2026-09"
+
+
+def test_weekly_application_deadlines_precede_existing_action_groups():
+    today = date(2026, 11, 9)
+    records = [
+        make_record(id="far-apply", action="Apply", deadline="2026-12-01"),
+        make_record(id="urgent-check", action="Check", deadline="2026-11-11"),
+        make_record(id="urgent-apply", action="Apply", deadline="2026-11-14"),
+        make_record(id="later-check", action="Check", deadline="2026-12-02"),
+        make_record(id="nonapplication", action="Take", deadline="2026-11-10"),
+        make_record(id="overdue-check", action="Check", deadline="2026-11-08"),
+        make_record(id="no-deadline-check", action="Check", when="2026-11"),
+    ]
+    assert [r.id for r in sort_records(records, today=today)] == [
+        "urgent-check", "urgent-apply", "nonapplication", "far-apply",
+        "overdue-check", "later-check", "no-deadline-check",
+    ]
+
+
+def test_weekly_window_is_inclusive_and_requires_actual_deadline():
+    today = date(2026, 11, 9)
+    from career_job_manager.model import application_due_this_week
+    assert application_due_this_week(make_record(action="Check", deadline="2026-11-09"), today)
+    assert application_due_this_week(make_record(action="Apply", deadline="2026-11-16"), today)
+    assert not application_due_this_week(make_record(action="Apply", deadline="2026-11-17"), today)
+    assert not application_due_this_week(make_record(action="Apply", deadline="2026-11-08"), today)
+    assert not application_due_this_week(make_record(action="Check", when="2026-11"), today)
+    assert not application_due_this_week(make_record(action="Wait", deadline="2026-11-11"), today)
+    assert not application_due_this_week(make_record(action="Archive", deadline="2026-11-11"), today)
