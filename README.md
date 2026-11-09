@@ -67,6 +67,19 @@ Data lives under:
 ~/Documents/Developer/job&co/data/
 ```
 
+## Weekly task export
+
+Use `job export this-week` (also `job export this week`) to write a **read-only task agenda JSON** to your Mac's Downloads folder, named `jobco-this-week-YYYY-MM-DD.json`, where the date is the coming Sunday. No additional arguments are required.
+
+```bash
+job export this-week
+job export this-week --output "$HOME/Downloads/week.json"
+```
+
+The export captures non-archived jobs whose **effective Next** is `ASAP`, today through Sunday (inclusive), or an explicitly entered past-due reminder. **Automatic expired application cutoffs are excluded** unless a later Next was manually scheduled. Weekly results preserve the current Next sorting, and include each job's Action, application Deadline, Target, Brief, Portal, Contact, Description, saved document filenames and whether Next was manually entered or automatically calculated.
+
+The file is a **read-only agenda**, not a normalized import or database backup. Its top-level keys are `format`, `as_of`, `week_ending`, and `items`. It never changes existing records. To export the full backup database as before, use `job export "$HOME/Downloads/jobco-all.json"`.
+
 ## Home
 
 ```text
@@ -82,6 +95,7 @@ Keys:
 
 ```text
 ↑ / ↓    move (scrolls automatically at the visible edges)
+t        Today: jump to the first Next-priority row
 Right    open application
 a        add
 /        search Company / Job / Action / Contact
