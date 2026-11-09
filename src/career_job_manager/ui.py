@@ -161,7 +161,10 @@ class FieldRow(Static):
 
     def begin_edit(self) -> None:
         self.editor = InlineBuffer.from_value(self.value)
-        self.editor.move_home()
+        # Entering a text field selects its current value. Paste/type replaces
+        # it in one step; Backspace/Delete clears it. Arrows cancel selection
+        # so a user can still edit individual characters.
+        self.editor.select_all()
         self._follow_cursor = True
         self.refresh(layout=True)
         self.call_after_refresh(self._reveal_cursor)
@@ -613,6 +616,7 @@ class ApplicationScreen(Screen[bool]):
         Binding("up", "move_up", "Up", priority=True),
         Binding("down", "move_down", "Down", priority=True),
         Binding("enter", "finish_interaction", "Select", priority=True),
+        Binding("ctrl+a", "select_field_text", "Select field", priority=True, show=False),
         ("right", "activate_field", "Choose"),
         ("c", "open_company", "Company"),
         ("left", "leave_choice", "Back"),
@@ -727,6 +731,17 @@ class ApplicationScreen(Screen[bool]):
         from .company_ui import CompanyScreen
         company = resolve(self.store.companies(), record.company_id, record.company)
         self.app.push_screen(CompanyScreen(self.store, company, 'strategy', record))
+
+    def action_select_field_text(self) -> None:
+        """Select only the current field's value, not the entire screen."""
+        row = self.focused
+        if not isinstance(row, FieldRow) or row.field not in TEXT_FIELDS:
+            return
+        if row.editor is None:
+            row.begin_edit()
+        else:
+            row.editor.select_all()
+            row.refresh(layout=True)
 
     def action_activate_field(self) -> None:
         row = self.focused
