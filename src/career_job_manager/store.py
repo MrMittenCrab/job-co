@@ -5,14 +5,15 @@ import os
 import shutil
 import tempfile
 import uuid
+from datetime import date
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
-from .model import ApplicationRecord, sort_records, _parse_deadline_or_none
+from .model import ApplicationRecord, sort_records, _parse_deadline_or_none, end_of_current_week
 from .importing import parse_import
 from .naming import application_stem, readable_folder_name
-from .timing import timing_precision
+from .timing import timing_precision, timing_start, timing_end
 from .company import company_union, merge_companies, merge_data, resolve, validate_companies, migrate_company
 
 
@@ -48,12 +49,15 @@ class CareerStore:
                 return record
         raise KeyError(record_id)
 
-    def shortlist(self, payload: object) -> tuple[int, int]:
-        """Promote existing Check records to Apply from an id-only manifest.
+    def shortlist(self, payload: object, *, today: date | None = None) -> tuple[int, int]:
+        """Promote existing Check records to Apply, scheduling them this week.
 
-        All identifiers are resolved before any modification. No records are
-        created; non-Check Actions and every other field remain unchanged.
+        Validate every ID before mutation; leave other Actions intact.
+        Set Next to this week's Sunday unless an earlier application cutoff
+        applies. Preserve an intentional ASAP Next as an explicit override.
         """
+        today = today or date.today()
+        sunday = end_of_current_week(today)
         if not isinstance(payload, dict) or set(payload) != {"schema_version", "shortlist"}:
             raise ValueError("Expected only schema_version and shortlist.")
         if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
@@ -92,9 +96,32 @@ class CareerStore:
         selected = {index[identifier] for identifier in requested}
         promoted = 0
         for number in selected:
-            if jobs[number].get("action") == "Check":
-                jobs[number]["action"] = "Apply"
-                promoted += 1
+            row = jobs[number]
+            if row.get("action") != "Check":
+                continue
+
+            # The shortlist is a conscious decision to apply this week,
+            # not a revision of the employer's application deadline.
+            next_due = sunday.isoformat()
+            cutoff = row.get("deadline", "")
+            exact = _parse_deadline_or_none(cutoff)
+            if exact and exact.date() <= sunday:
+                # Preserve exact time if the cutoff has one.
+                next_due = cutoff
+            elif cutoff:
+                try:
+                    start, end = timing_start(cutoff), timing_end(cutoff)
+                except (ValueError, TypeError):
+                    pass  # Unrecognized legacy text cannot establish a cutoff.
+                else:
+                    if end < sunday:
+                        # An expired vague application period keeps its
+                        # original first-week Sunday in the past.
+                        next_due = min(end_of_current_week(start), end).isoformat()
+            row["action"] = "Apply"
+            if str(row.get("next", "")).upper() != "ASAP":
+                row["next"] = next_due
+            promoted += 1
         if promoted:
             # One atomic write, only after validating every requested ID.
             self._write(document)
