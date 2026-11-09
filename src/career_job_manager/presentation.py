@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
 from rich.text import Text
 
-from .model import ApplicationRecord, action_uses_target, display_deadline
+from .model import ApplicationRecord, action_uses_target, display_deadline, next_value
 from .timing import current_season, display_when
 
 VALUE_COLUMN = 15
@@ -15,13 +16,14 @@ ACTION_COLORS = {
 DESCRIPTION_TEXT_FIELD = "DescriptionText"
 
 TEXT_FIELDS = (
-    "Company",
-    "Job",
+    "Next",
     "Deadline",
     "Target",
     "Brief",
     "Portal",
     "Contact",
+    "Company",
+    "Job",
     DESCRIPTION_TEXT_FIELD,
 )
 
@@ -34,13 +36,14 @@ FILE_FIELDS = (
 
 FORM_FIELDS = (
     "Action",
-    "Company",
-    "Job",
+    "Next",
     "Deadline",
     "Target",
     "Brief",
     "Portal",
     "Contact",
+    "Company",
+    "Job",
     "Resume",
     "Letter",
     "Form",
@@ -124,12 +127,14 @@ def render_home_lines(records: list[ApplicationRecord], selected_index: int = 0)
     def columns(values: tuple[str, ...]) -> str:
         return "".join(_home_cell(value, width) for value, width in zip(values, widths)).rstrip()
 
-    lines = ["  " + columns(("Deadline", "Company", "Program", "Action"))]
+    today = date.today()
+    lines = ["  " + columns(("Next", "Company", "Program", "Action"))]
     for index, record in enumerate(records):
         marker = ">" if index == selected_index else " "
-        deadline = (display_deadline(record.deadline) if record.deadline
-                    else display_when(record.when or current_season()))
-        lines.append(f"{marker} " + columns((deadline, record.company, record.job, record.action)))
+        due = next_value(record, today)
+        shown = (display_deadline(due) if due
+                 else display_when(record.when or current_season()))
+        lines.append(f"{marker} " + columns((shown, record.company, record.job, record.action)))
     return lines
 
 
