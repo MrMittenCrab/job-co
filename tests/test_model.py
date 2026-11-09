@@ -358,3 +358,25 @@ def test_next_supports_asap_but_disallows_approximate_periods():
     assert normalize_next("2026-11-13") == "2026-11-13"
     with pytest.raises(ValueError):
         normalize_next("2026-fall")
+
+
+
+def test_active_actions_are_equal_priority_and_check_is_later_on_same_next():
+    from datetime import date
+
+    today = date(2026, 11, 10)
+    active = ("Apply", "Wait", "Take", "Go", "Respond", "Email")
+    records = [
+        make_record(id=action, company=action, action=action, next="2026-11-15")
+        for action in active
+    ] + [
+        make_record(id="check", company="Aaa", action="Check", next="2026-11-15"),
+        make_record(id="early-check", company="Aaa", action="Check", next="2026-11-14"),
+        make_record(id="archive", company="Aaa", action="Archive", next="2026-11-12"),
+    ]
+    result = sort_records(records, today=today)
+    ids = [item.id for item in result]
+    assert ids[0] == "early-check"  # Chronology is primary, even for Check.
+    assert set(ids[1:7]) == set(active)  # No preferred stage within same Next.
+    assert ids[7] == "check"
+    assert ids[8] == "archive"

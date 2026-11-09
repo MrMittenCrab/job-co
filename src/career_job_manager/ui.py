@@ -812,10 +812,11 @@ class ApplicationScreen(Screen[bool]):
         self._row(field).set_value(value)
         if field == "Action":
             self._sync_target_visibility()
-            if value != old:
-                # A new stage needs a new Next; never carry its old reminder
-                # or mutate the original application Deadline.
-                self._auto_next = True
+            if value != old and self._auto_next:
+                # Action changes must not discard a manually scheduled Next.
+                # For an automatic Next, refresh its display (e.g. Archive),
+                # without turning it into a manual override. The original
+                # application Deadline remains separate and unchanged.
                 self._refresh_auto_next()
 
     def _view_document(self, field: str) -> None:
