@@ -89,7 +89,7 @@ class InlineBuffer:
 def editor_for_field(field: str, value: str) -> InlineBuffer:
     """Prepare an editor; URLs start selected for single-step replacement."""
     editor = InlineBuffer.from_value(value)
-    if field in {"Portal", "Target"}:
+    if field in {"Portal", "Target", "Next"}:
         editor.select_all()
     else:
         editor.move_home()
