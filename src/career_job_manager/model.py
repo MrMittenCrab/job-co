@@ -236,12 +236,12 @@ def effective_queue_date(record: ApplicationRecord, today: date) -> date:
     return day
 
 
-def application_due_this_week(record: ApplicationRecord, today: date) -> bool:
-    """True only for unsubmitted application actions with a confirmed deadline in 0–7 days."""
-    if record.action not in {"Apply", "Check"} or not record.deadline:
+def deadline_due_within_two_weeks(record: ApplicationRecord, today: date) -> bool:
+    """Prioritize non-archived records with explicit deadlines from today through day 14."""
+    if record.action == "Archive" or not record.deadline:
         return False
     deadline_date = _parse_deadline(record.deadline).date()
-    return today <= deadline_date <= today + timedelta(days=7)
+    return today <= deadline_date <= today + timedelta(days=14)
 
 
 def sort_records(
@@ -263,10 +263,11 @@ def sort_records(
         effective_day = effective_queue_date(record, today)
         if start.date() != effective_day:
             start = datetime.combine(effective_day, time.min)
-        # Confirmed deadlines in the next seven days take priority, regardless
-        # of Check vs Apply. Everyone else keeps the original sort order.
-        if application_due_this_week(record, today):
-            return (0, 0, 0, start, record.company.casefold(), record.job.casefold())
+        # Confirmed non-archived deadlines from today through day 14 take
+        # priority, regardless of Action. All other records retain old order.
+        if deadline_due_within_two_weeks(record, today):
+            return (0, 0, 0, _parse_deadline(record.deadline),
+                    record.company.casefold(), record.job.casefold())
         action_priority = record.action == "Check"
         return (1, action_priority, precision, start, record.company.casefold(), record.job.casefold())
 
