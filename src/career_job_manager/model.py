@@ -305,72 +305,69 @@ def _season_end(today: date) -> date:
 
 
 def default_next(record: ApplicationRecord, today: date) -> str:
-    """Rolling Next when the user has not set an explicit action time.
+    """Derive a precise Next without ever mutating the original Deadline.
 
-    Active recruitment, especially an approximate current month/season,
-    receives a checkpoint no later than this Sunday's end of week.
+    Exact application deadline -> exact date/time, past or future.
+    Vague month/season/range -> the first-week Sunday outside its period;
+    current-week Sunday while inside the period.
+    No deadline -> opening ('when') checkpoint, or this week's Sunday.
     """
     if record.action == "Archive":
         return ""
+
     sunday = end_of_current_week(today)
-    # A submitted Wait job uses its known application cutoff as a
-    # checkpoint, exact or vague. An elapsed cutoff prompts review, not
-    # an automatic assumption of rejection.
-    if record.action == "Wait" and not record.deadline:
-        return sunday.isoformat()
-    if record.action not in {"Apply", "Check", "Wait"}:
-        return sunday.isoformat()
     raw = record.deadline
     parsed = _parse_deadline_or_none(raw)
     if parsed:
-        if record.action == "Wait":
-            return raw
-        due = parsed.date()
-        if due < today:
-            return raw  # Expired deadline: never silently create a fresh opening.
-        if due <= _season_end(today):
-            return min(due, sunday).isoformat()
         return raw
+
     if raw:
         try:
             start, end = timing.timing_start(raw), timing.timing_end(raw)
         except ValueError:
-            return sunday.isoformat()  # Unrecognized legacy text: manual review.
-        if today < start:
-            # Future vague periods are checked at the end of their first
-            # calendar week, rather than on their opening day.
-            return min(end_of_current_week(start), end).isoformat()
-        if today <= end:
+            # Non-date legacy text is not a closing date. Keep it intact
+            # but display a specific review date rather than "unclear".
+            return sunday.isoformat()
+        if start <= today <= end:
             return min(sunday, end).isoformat()
-        return end.isoformat()
-    # 'when' records when recruitment opens, not a confirmed closing date.
-    # Once an opportunity has opened it warrants another weekly review.
+        return min(end_of_current_week(start), end).isoformat()
+
+    # Without a closing date, use the recorded recruitment opening period as
+    # a checkpoint. An exact opening already passed triggers weekly review,
+    # not a fictitious expired application deadline.
     when = record.when or timing.season_for_date(today)
-    start = timing.timing_start(when)
-    if start > today:
-        # Exact opening dates remain exact; vague opening periods get a
-        # checkpoint at the end of their first calendar week.
-        if timing.timing_precision(when) == 3:
-            return start.isoformat()
-        return min(end_of_current_week(start), timing.timing_end(when)).isoformat()
-    return sunday.isoformat()
+    try:
+        start = timing.timing_start(when)
+        end = timing.timing_end(when)
+        precision = timing.timing_precision(when)
+    except ValueError:
+        return sunday.isoformat()
+    if precision == 3:
+        return (start if start > today else sunday).isoformat()
+    if start <= today <= end:
+        return min(sunday, end).isoformat()
+    return min(end_of_current_week(start), end).isoformat()
 
 
 def next_value(record: ApplicationRecord, today: date) -> str:
-    return record.next or default_next(record, today)
+    """Return an exact date/time or ASAP, even for malformed legacy data."""
+    if record.next:
+        if record.next.upper() == "ASAP":
+            return "ASAP"
+        if _parse_deadline_or_none(record.next):
+            return record.next
+    return default_next(record, today)
 
 
 def effective_queue_date(record: ApplicationRecord, today: date) -> date:
+    """Chronological Next date; overdue Wait is not artificially moved."""
     raw = next_value(record, today)
     parsed = _parse_deadline_or_none(raw)
-    day = today if raw == "ASAP" else parsed.date() if parsed else date.max
-    if record.action == "Wait" and day <= today:
-        return today + timedelta(days=1)
-    return day
+    return today if raw == "ASAP" else parsed.date() if parsed else date.max
 
 
 def deadline_due_within_two_weeks(record: ApplicationRecord, today: date) -> bool:
-    """Compatibility predicate: urgency is based on Next, not Deadline."""
+    """Whether current Next falls within today and the following 14 days."""
     if record.action == "Archive":
         return False
     raw = next_value(record, today)
@@ -381,7 +378,7 @@ def deadline_due_within_two_weeks(record: ApplicationRecord, today: date) -> boo
 
 
 def undated_application_needing_review(record: ApplicationRecord, today: date) -> bool:
-    """An unsubmitted job without an exact application cutoff that is open for review."""
+    """Whether an Apply/Check posting has no confirmed application cutoff."""
     if record.action not in {"Apply", "Check"} or record.next:
         return False
     if _parse_deadline_or_none(record.deadline):
@@ -391,35 +388,42 @@ def undated_application_needing_review(record: ApplicationRecord, today: date) -
 
 def sort_records(records: Iterable[ApplicationRecord], *, today: date | None = None
                  ) -> list[ApplicationRecord]:
-    """Schedule by Next: ASAP, explicit overdue, future, auto-expired, archived."""
+    """Chronological Next (including past), then archived records.
+
+    ASAP occupies the start of today's date. Earlier past dates always
+    precede today's actions, regardless of Action or manual/auto provenance.
+    """
     today = today or date.today()
 
     def key(record: ApplicationRecord):
-        name = (record.company.casefold(), record.job.casefold())
+        name = (record.company.casefold(), record.job.casefold(), record.id)
         if record.action == "Archive":
-            return (4, date.max, 1, 1, *name)
-        raw = next_value(record, today)
-        if raw == "ASAP":
-            return (0, date.min, 0 if record.action != "Wait" else 1, 0, *name)
-        parsed = _parse_deadline_or_none(raw)
-        if parsed is None:
-            return (3, date.max, 1, 1, *name)
-        day = effective_queue_date(record, today)
-        # Explicit missed reminders require attention; expired imported
-        # application cutoffs are not mistaken for still-open applications.
-        if record.next and day < today:
-            tier = 1
-        elif day >= today:
-            tier = 2
+            return (1, datetime.max, True, *name)
+        due = next_value(record, today)
+        if due == "ASAP":
+            moment = datetime.combine(today, time.min)
         else:
-            tier = 3
-        cutoff = _parse_deadline_or_none(record.deadline)
-        # When Next is tied, prefer the earlier actual application cutoff.
-        return (tier, day, record.action == "Check",
-                0 if record.next else 1,
-                cutoff.date() if cutoff else date.max, *name)
+            moment = _parse_deadline_or_none(due) or datetime.max
+        return (0, moment, record.action == "Check", *name)
 
     return sorted(records, key=key)
+
+
+def today_position(records: Iterable[ApplicationRecord], *, today: date | None = None) -> int:
+    """First non-archived Next on/after today in a sorted home list.
+
+    When no current or future actions exist, select the last past active
+    entry; this avoids starting the user in Archive.
+    """
+    today = today or date.today()
+    last_active = None
+    for index, record in enumerate(records):
+        if record.action == "Archive":
+            break
+        last_active = index
+        if effective_queue_date(record, today) >= today:
+            return index
+    return last_active if last_active is not None else 0
 
 
 def filter_records(records: Iterable[ApplicationRecord], query: str) -> list[ApplicationRecord]:
