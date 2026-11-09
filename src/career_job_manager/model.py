@@ -62,7 +62,8 @@ class ApplicationRecord:
     id: str
     company: str
     job: str
-    deadline: str = ""
+    deadline: str = ""  # Original application cutoff: exact or approximate.
+    next: str = ""      # Explicit current-action due date or ASAP; blank = dynamic default.
     action: str = "Apply"
     target: str = ""
     portal: str = ""
@@ -99,6 +100,7 @@ class ApplicationRecord:
         # but new or edited deadlines must be real dates.
         if not preserve_legacy_deadline:
             self.deadline = normalize_deadline(self.deadline)
+        self.next = normalize_next(self.next)
         self.target = self.target.strip()
         self.portal = self.portal.strip()
         self.contact = self.contact.strip()
@@ -137,6 +139,13 @@ class ApplicationRecord:
             payload.pop("apply", None)
 
         payload.setdefault("target", "")
+        # Historical records sometimes used Deadline=ASAP for an assessment
+        # or follow-up. Move only that unambiguous non-date value to Next.
+        # Never infer whether other old dates were for applications or tests.
+        if str(payload.get("deadline", "")).strip().casefold() == "asap":
+            if not payload.get("next"):
+                payload["next"] = "ASAP"
+            payload["deadline"] = ""
         payload.setdefault("description_text", "")
         payload.setdefault("form", "")
 
@@ -180,9 +189,33 @@ def _format_deadline(parsed: datetime, fmt: str) -> str:
 
 
 def normalize_deadline(value: str) -> str:
+    """Application cutoff: exact date or approximate year/month/season.
+
+    ASAP is deliberately rejected here; it belongs only in Next.
+    """
     value = _clean_deadline_text(value)
     if not value:
         return ""
+    if value.casefold() == "asap":
+        raise ValueError("Deadline cannot be ASAP; set Next to ASAP instead.")
+    # Existing ISO period syntax is also used by the import 'when' metadata.
+    try:
+        if timing.timing_precision(value) < 3:
+            timing.timing_start(value)
+            return value
+    except ValueError:
+        pass
+    season = re.fullmatch(r"(?i)(spring|summer|fall|autumn|winter)(?: (20\\d{2}))?", value)
+    if season:
+        year = int(season[2]) if season[2] else date.today().year
+        season_name = "fall" if season[1].casefold() == "autumn" else season[1].casefold()
+        return f"{year}-{season_name}"
+    for fmt in ("%b %Y", "%B %Y"):
+        try:
+            parsed = datetime.strptime(value, fmt)
+            return parsed.strftime("%Y-%m")
+        except ValueError:
+            pass
 
     for fmt in _DEADLINE_FORMATS:
         try:
@@ -210,6 +243,18 @@ def normalize_deadline(value: str) -> str:
         "Deadline examples: Sep 25, Sep 25 14:00, Sep 25 2pm, "
         "25 Sep, or 2026-09-25 14:00."
     )
+
+
+def normalize_next(value: str) -> str:
+    """Explicit current-action due date; ASAP is valid, vague periods are not."""
+    if value.strip().casefold() == "asap":
+        return "ASAP"
+    if not value.strip():
+        return ""
+    result = normalize_deadline(value)
+    if _parse_deadline_or_none(result) is None:
+        raise ValueError("Next must be a date/time or ASAP (not a month or season).")
+    return result
 
 
 def _parse_deadline(value: str) -> datetime:
@@ -246,68 +291,110 @@ def display_deadline(value: str) -> str:
     return month_day
 
 
+def end_of_current_week(today: date) -> date:
+    """Sunday of the local calendar week (Monday through Sunday)."""
+    return today + timedelta(days=6 - today.weekday())
+
+
+def _season_end(today: date) -> date:
+    return timing.timing_end(timing.current_season(today))
+
+
+def default_next(record: ApplicationRecord, today: date) -> str:
+    """Rolling Next when the user has not set an explicit action time.
+
+    Active recruitment, especially an approximate current month/season,
+    receives a checkpoint no later than this Sunday's end of week.
+    """
+    if record.action == "Archive":
+        return ""
+    sunday = end_of_current_week(today)
+    if record.action not in {"Apply", "Check"}:
+        return sunday.isoformat()
+    raw = record.deadline
+    parsed = _parse_deadline_or_none(raw)
+    if parsed:
+        due = parsed.date()
+        if due < today:
+            return raw  # Expired deadline: never silently create a fresh opening.
+        if due <= _season_end(today):
+            return min(due, sunday).isoformat()
+        return raw
+    if raw:
+        try:
+            start, end = timing.timing_start(raw), timing.timing_end(raw)
+        except ValueError:
+            return sunday.isoformat()  # Unrecognized legacy text: manual review.
+        if today < start:
+            return start.isoformat()
+        if today <= end:
+            return min(sunday, end).isoformat()
+        return end.isoformat()
+    # 'when' records when recruitment opens, not a confirmed closing date.
+    # Once an opportunity has opened it warrants another weekly review.
+    start = timing.timing_start(record.when or timing.current_season(today))
+    return (start if start > today else sunday).isoformat()
+
+
+def next_value(record: ApplicationRecord, today: date) -> str:
+    return record.next or default_next(record, today)
+
+
 def effective_queue_date(record: ApplicationRecord, today: date) -> date:
-    """Schedule Wait after today without changing its stored or displayed deadline."""
-    parsed = _parse_deadline_or_none(record.deadline)
-    day = (parsed.date() if parsed
-           else timing.timing_start(record.when or timing.current_season()))
+    raw = next_value(record, today)
+    parsed = _parse_deadline_or_none(raw)
+    day = today if raw == "ASAP" else parsed.date() if parsed else date.max
     if record.action == "Wait" and day <= today:
         return today + timedelta(days=1)
     return day
 
 
 def deadline_due_within_two_weeks(record: ApplicationRecord, today: date) -> bool:
-    """Prioritize non-archived records with explicit deadlines from today through day 14."""
+    """Compatibility predicate: urgency is based on Next, not Deadline."""
     if record.action == "Archive":
         return False
-    parsed = _parse_deadline_or_none(record.deadline)
+    raw = next_value(record, today)
+    if raw == "ASAP":
+        return True
+    parsed = _parse_deadline_or_none(raw)
     return bool(parsed and today <= parsed.date() <= today + timedelta(days=14))
 
 
 def undated_application_needing_review(record: ApplicationRecord, today: date) -> bool:
-    """Unsubmitted job with no exact deadline and recruitment timing already started.
-
-    Timing is a queue heuristic, not proof the vacancy is still accepting applications.
-    """
-    if record.action not in {"Apply", "Check"} or _parse_deadline_or_none(record.deadline):
+    """An unsubmitted job without an exact application cutoff that is open for review."""
+    if record.action not in {"Apply", "Check"} or record.next:
         return False
-    return timing.timing_start(record.when or timing.current_season()) <= today
+    if _parse_deadline_or_none(record.deadline):
+        return False
+    return timing.timing_start(record.when or timing.current_season(today)) <= today
 
 
-def sort_records(
-    records: Iterable[ApplicationRecord], *, today: date | None = None,
-) -> list[ApplicationRecord]:
+def sort_records(records: Iterable[ApplicationRecord], *, today: date | None = None
+                 ) -> list[ApplicationRecord]:
+    """Schedule by Next: ASAP, explicit overdue, future, auto-expired, archived."""
     today = today or date.today()
 
     def key(record: ApplicationRecord):
-        precision = 0
-        parsed_deadline = _parse_deadline_or_none(record.deadline)
-        if parsed_deadline:
-            start = parsed_deadline
+        name = (record.company.casefold(), record.job.casefold())
+        if record.action == "Archive":
+            return (4, date.max, 1, 1, *name)
+        raw = next_value(record, today)
+        if raw == "ASAP":
+            return (0, date.min, 0 if record.action != "Wait" else 1, 0, *name)
+        parsed = _parse_deadline_or_none(raw)
+        if parsed is None:
+            return (3, date.max, 1, 1, *name)
+        day = effective_queue_date(record, today)
+        # Explicit missed reminders require attention; expired imported
+        # application cutoffs are not mistaken for still-open applications.
+        if record.next and day < today:
+            tier = 1
+        elif day >= today:
+            tier = 2
         else:
-            when = record.when or timing.current_season()
-            precision = (0 if timing.timing_precision(when) == 3 else
-                         1 if timing.timing_precision(when) == 2 else
-                         2 if ".." in when else 3)
-            day = timing.timing_start(when)
-            start = datetime.combine(day, time.min)
-        effective_day = effective_queue_date(record, today)
-        if start.date() != effective_day:
-            start = datetime.combine(effective_day, time.min)
-        # 1: Confirmed non-archived deadlines due in the next 14 days.
-        if deadline_due_within_two_weeks(record, today):
-            return (0, parsed_deadline, 0, 0,
-                    record.company.casefold(), record.job.casefold())
-        # 2: Unsubmitted applications with no confirmed deadline. Surface
-        # recently recorded recruitment timing first; never infer a deadline.
-        if undated_application_needing_review(record, today):
-            when = record.when or timing.current_season()
-            return (1, -timing.timing_start(when).toordinal(),
-                    -timing.timing_precision(when), record.action == "Check",
-                    record.company.casefold(), record.job.casefold())
-        # 3: Everyone else retains the established Action/precision/date order.
-        action_priority = record.action == "Check"
-        return (2, action_priority, precision, start, record.company.casefold(), record.job.casefold())
+            tier = 3
+        return (tier, day, record.action == "Check",
+                0 if record.next else 1, *name)
 
     return sorted(records, key=key)
 
