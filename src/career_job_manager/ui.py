@@ -14,7 +14,7 @@ from textual.widgets import Input, Static
 
 from .editing import InlineBuffer, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, deadline_due_within_two_weeks, effective_queue_date, filter_records
+from .model import ApplicationRecord, action_uses_target, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -451,8 +451,12 @@ class HomeScreen(Screen):
         self.query_one("#search", SearchInput).styles.display = "none"
         self.refresh_list()
         widget = self.query_one("#applications", ApplicationList)
-        # Always start on the first record with a confirmed deadline in 14 days.
-        if self.visible_records and deadline_due_within_two_weeks(self.visible_records[0], self.created_today):
+        # Start at the first actionable priority: a near deadline, or an
+        # undated Apply/Check record that needs prompt vacancy verification.
+        if self.visible_records and (
+            deadline_due_within_two_weeks(self.visible_records[0], self.created_today)
+            or undated_application_needing_review(self.visible_records[0], self.created_today)
+        ):
             widget.selected_index = 0
             widget.first_visible = 0
             widget.refresh()
