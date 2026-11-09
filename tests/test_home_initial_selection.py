@@ -5,6 +5,7 @@ from datetime import date
 import pytest
 
 from career_job_manager import model, ui
+from career_job_manager.model import today_position
 from career_job_manager.store import CareerStore
 from career_job_manager.ui import ApplicationList, CareerApp, HomeScreen
 
@@ -44,7 +45,9 @@ def test_initial_date_selection(tmp_path, clock, rows):
         async with app.run_test() as pilot:
             await pilot.pause()
             selected = app.screen.selected_record()
-            assert (selected.id if selected else None) == (order[0] if order else None)
+            anchor = today_position(store.list(), today=clock.today())
+            assert (selected.id if selected else None) == (order[anchor] if order else None)
+            assert app.screen.query_one(ApplicationList).first_visible == anchor
             assert [r.id for r in app.screen.visible_records] == order
     asyncio.run(scenario())
 
@@ -60,8 +63,8 @@ def test_creation_clock_initial_viewport_and_detail_return(tmp_path, clock):
             home = app.screen
             widget = home.query_one(ApplicationList)
             await pilot.pause()
-            assert widget.selected().id == store.list()[0].id
-            assert widget.first_visible == 0
+            assert widget.selected().id == '17'
+            assert widget.first_visible == 17
             widget.move(3)
             await pilot.pause()
             previous = widget.selected_index, widget.first_visible
@@ -77,12 +80,12 @@ def test_creation_clock_initial_viewport_and_detail_return(tmp_path, clock):
             await app.push_screen(HomeScreen(store))
             await pilot.pause()
             fresh = app.screen.query_one(ApplicationList)
-            assert fresh.selected().id == store.list()[0].id
-            assert fresh.first_visible == 0
+            assert fresh.selected().id == '24'
+            assert fresh.first_visible == 24
     asyncio.run(scenario())
 
 
-def test_expired_wait_appears_after_today_and_is_initially_selected(tmp_path, clock):
+def test_expired_wait_is_above_today_and_not_initially_selected(tmp_path, clock):
     async def scenario():
         store = CareerStore(tmp_path)
         store.import_jobs({'jobs': [
@@ -97,9 +100,9 @@ def test_expired_wait_appears_after_today_and_is_initially_selected(tmp_path, cl
         async with app.run_test() as pilot:
             await pilot.pause()
             assert [r.id for r in app.screen.visible_records] == [
-                'waiting', 'future', 'old',
+                'waiting', 'old', 'future',
             ]
-            assert app.screen.selected_record().id == 'waiting'
+            assert app.screen.selected_record().id == 'future'
             assert store.get('waiting').deadline == '2026-09-15'
             clock.current = date(2026, 10, 25)
             await app.push_screen(HomeScreen(store))
@@ -107,5 +110,5 @@ def test_expired_wait_appears_after_today_and_is_initially_selected(tmp_path, cl
             assert [r.id for r in app.screen.visible_records] == [
                 'waiting', 'old', 'future',
             ]
-            assert app.screen.selected_record().id == 'waiting'
+            assert app.screen.selected_record().id == 'future'
     asyncio.run(scenario())
