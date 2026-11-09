@@ -39,5 +39,5 @@ def test_today_label_is_visible_in_home_help(tmp_path):
         app = CareerApp(store)
         async with app.run_test() as pilot:
             await pilot.pause()
-            assert "Today" in app.screen.query_one("#home-help").render().plain
+            assert "Today" in str(app.screen.query_one("#home-help").render())
     asyncio.run(scenario())
