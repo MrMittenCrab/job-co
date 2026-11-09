@@ -217,10 +217,25 @@ def _parse_deadline(value: str) -> datetime:
     raise ValueError(f"Invalid stored deadline: {value}")
 
 
+def _parse_deadline_or_none(value: str) -> datetime | None:
+    """Read historical deadline metadata without crashing on 'ASAP' or other text.
+
+    Keep invalid source text untouched; new user edits remain strictly validated.
+    """
+    if not value:
+        return None
+    try:
+        return _parse_deadline(value)
+    except ValueError:
+        return None
+
+
 def display_deadline(value: str) -> str:
     if not value:
         return "—"
-    parsed = _parse_deadline(value)
+    parsed = _parse_deadline_or_none(value)
+    if parsed is None:
+        return value  # Show the original non-date value for explicit correction.
     month_day = f"{parsed.day} {parsed.strftime('%b')}"
     if len(value) > 10:
         return f"{month_day} {parsed.strftime('%H:%M')}"
@@ -229,7 +244,8 @@ def display_deadline(value: str) -> str:
 
 def effective_queue_date(record: ApplicationRecord, today: date) -> date:
     """Schedule Wait after today without changing its stored or displayed deadline."""
-    day = (_parse_deadline(record.deadline).date() if record.deadline
+    parsed = _parse_deadline_or_none(record.deadline)
+    day = (parsed.date() if parsed
            else timing.timing_start(record.when or timing.current_season()))
     if record.action == "Wait" and day <= today:
         return today + timedelta(days=1)
@@ -238,10 +254,10 @@ def effective_queue_date(record: ApplicationRecord, today: date) -> date:
 
 def deadline_due_within_two_weeks(record: ApplicationRecord, today: date) -> bool:
     """Prioritize non-archived records with explicit deadlines from today through day 14."""
-    if record.action == "Archive" or not record.deadline:
+    if record.action == "Archive":
         return False
-    deadline_date = _parse_deadline(record.deadline).date()
-    return today <= deadline_date <= today + timedelta(days=14)
+    parsed = _parse_deadline_or_none(record.deadline)
+    return bool(parsed and today <= parsed.date() <= today + timedelta(days=14))
 
 
 def undated_application_needing_review(record: ApplicationRecord, today: date) -> bool:
@@ -249,7 +265,7 @@ def undated_application_needing_review(record: ApplicationRecord, today: date) -
 
     Timing is a queue heuristic, not proof the vacancy is still accepting applications.
     """
-    if record.action not in {"Apply", "Check"} or record.deadline:
+    if record.action not in {"Apply", "Check"} or _parse_deadline_or_none(record.deadline):
         return False
     return timing.timing_start(record.when or timing.current_season()) <= today
 
@@ -261,8 +277,9 @@ def sort_records(
 
     def key(record: ApplicationRecord):
         precision = 0
-        if record.deadline:
-            start = _parse_deadline(record.deadline)
+        parsed_deadline = _parse_deadline_or_none(record.deadline)
+        if parsed_deadline:
+            start = parsed_deadline
         else:
             when = record.when or timing.current_season()
             precision = (0 if timing.timing_precision(when) == 3 else
@@ -275,7 +292,7 @@ def sort_records(
             start = datetime.combine(effective_day, time.min)
         # 1: Confirmed non-archived deadlines due in the next 14 days.
         if deadline_due_within_two_weeks(record, today):
-            return (0, _parse_deadline(record.deadline), 0, 0,
+            return (0, parsed_deadline, 0, 0,
                     record.company.casefold(), record.job.casefold())
         # 2: Unsubmitted applications with no confirmed deadline. Surface
         # recently recorded recruitment timing first; never infer a deadline.
