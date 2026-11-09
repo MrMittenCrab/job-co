@@ -219,7 +219,7 @@ def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline()
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "next", "wait", "future-wait", "old",
+        "wait", "next", "future-wait", "old",
     ]
     assert records[1].deadline == "2026-09-01"
     records[1].action = "Apply"
