@@ -291,7 +291,7 @@ def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_e
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
         "urgent", "approx", "newer-apply", "undated-wait",
-        "newer-check", "older", "future-start", "far-deadline",
+        "newer-check", "older", "far-deadline", "future-start",
         "archived-undated",
     ]
 
