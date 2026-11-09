@@ -12,7 +12,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, Static
 
-from .editing import InlineBuffer, normalize_pasted_text
+from .editing import InlineBuffer, editor_for_field, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
 from .model import ApplicationRecord, action_uses_target, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records
 from .presentation import (
@@ -160,8 +160,7 @@ class FieldRow(Static):
         self.refresh(layout=True)
 
     def begin_edit(self) -> None:
-        self.editor = InlineBuffer.from_value(self.value)
-        self.editor.move_home()
+        self.editor = editor_for_field(self.field, self.value)
         self._follow_cursor = True
         self.refresh(layout=True)
         self.call_after_refresh(self._reveal_cursor)
@@ -344,7 +343,8 @@ class FieldRow(Static):
         elif key == "right":
             self.editor.move_right()
             self.refresh(layout=True)
-        elif key == "ctrl+a":
+        elif key in {"super+a", "cmd+a"}:
+            # Cmd is available only if the terminal forwards it to Textual.
             self.editor.select_all()
             self.refresh(layout=True)
         elif key == "home":

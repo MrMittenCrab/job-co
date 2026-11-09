@@ -91,10 +91,10 @@ For Resume, Letter, Form, and Brochure, Right enters the View / Choose row with 
 ```text
 HSBC — Global Banking Graduate
 
+> Action       Wait
   Company      HSBC
   Job          Global Banking Graduate
   Deadline     Sep 25
-> Action       Wait
   Portal       https://company.com/my-applications
   Contact      Jane Smith
 
@@ -106,7 +106,7 @@ HSBC — Global Banking Graduate
                advisory work. Full text wraps below.
 ```
 
-Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Ctrl+A selects the entire text field; Backspace or Delete clears the selection. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
+The detail screen starts with **Action**, followed by Company, Job and Deadline. Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Editing an existing Portal or Target automatically selects its entire value: pasting a new link replaces the old link, and Backspace/Delete clears it. Press Left or Right to cancel the selection if you only want to change part of the URL. When a terminal forwards Cmd+A (`super+a`) to Textual, it selects all within the focused field. Many macOS terminal apps intercept Cmd+A for terminal-wide selection, so job&co cannot reliably capture it. The earlier Ctrl+A handler has been removed. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
 
 On Action, Right opens the existing dropdown. Up/Down move the highlight; Left or Right commits the highlighted option and closes the dropdown. Enter commits the highlighted option and closes the dropdown; press Enter again to save and return home. Actions are Apply, Wait, Take, Go, Respond, Archive, Email, and Check. Manual applications default to Apply; JSON imports start at Check.
 

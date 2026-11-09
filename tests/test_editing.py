@@ -66,3 +66,44 @@ def test_right_on_empty_text_and_selection():
     editor.move_right()
     assert editor.cursor == 3
     assert editor.value == "abc"
+
+
+def test_portal_and_target_auto_select_for_replacement():
+    from career_job_manager.editing import editor_for_field
+
+    for field in ("Portal", "Target"):
+        editor = editor_for_field(field, "https://example.com/old")
+        assert editor.all_selected
+        editor.insert("https://example.com/new")
+        assert editor.value == "https://example.com/new"
+        assert not editor.all_selected
+
+
+def test_url_selection_backspace_clears_entire_field():
+    from career_job_manager.editing import editor_for_field
+
+    editor = editor_for_field("Portal", "https://example.com/old")
+    editor.backspace()
+    assert editor.value == ""
+    assert editor.cursor == 0
+
+
+def test_non_url_fields_do_not_auto_select():
+    from career_job_manager.editing import editor_for_field
+
+    editor = editor_for_field("Company", "Citi")
+    assert not editor.all_selected
+    assert editor.cursor == 0
+    editor.insert("Old ")
+    assert editor.value == "Old Citi"
+
+
+def test_arrow_cancels_url_selection_without_deleting_value():
+    from career_job_manager.editing import editor_for_field
+
+    editor = editor_for_field("Portal", "https://example.com")
+    editor.move_right()
+    assert editor.cursor == len(editor.value)
+    assert not editor.all_selected
+    editor.insert("/jobs")
+    assert editor.value == "https://example.com/jobs"
