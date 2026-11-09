@@ -397,8 +397,11 @@ def sort_records(records: Iterable[ApplicationRecord], *, today: date | None = N
             tier = 2
         else:
             tier = 3
+        cutoff = _parse_deadline_or_none(record.deadline)
+        # When Next is tied, prefer the earlier actual application cutoff.
         return (tier, day, record.action == "Check",
-                0 if record.next else 1, *name)
+                0 if record.next else 1,
+                cutoff.date() if cutoff else date.max, *name)
 
     return sorted(records, key=key)
 
