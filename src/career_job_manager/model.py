@@ -236,6 +236,14 @@ def effective_queue_date(record: ApplicationRecord, today: date) -> date:
     return day
 
 
+def application_due_this_week(record: ApplicationRecord, today: date) -> bool:
+    """True only for unsubmitted application actions with a confirmed deadline in 0–7 days."""
+    if record.action not in {"Apply", "Check"} or not record.deadline:
+        return False
+    deadline_date = _parse_deadline(record.deadline).date()
+    return today <= deadline_date <= today + timedelta(days=7)
+
+
 def sort_records(
     records: Iterable[ApplicationRecord], *, today: date | None = None,
 ) -> list[ApplicationRecord]:
@@ -255,9 +263,12 @@ def sort_records(
         effective_day = effective_queue_date(record, today)
         if start.date() != effective_day:
             start = datetime.combine(effective_day, time.min)
-        # Only Check forms a separate Action group.
+        # Confirmed deadlines in the next seven days take priority, regardless
+        # of Check vs Apply. Everyone else keeps the original sort order.
+        if application_due_this_week(record, today):
+            return (0, 0, 0, start, record.company.casefold(), record.job.casefold())
         action_priority = record.action == "Check"
-        return (action_priority, precision, start, record.company.casefold(), record.job.casefold())
+        return (1, action_priority, precision, start, record.company.casefold(), record.job.casefold())
 
     return sorted(records, key=key)
 
