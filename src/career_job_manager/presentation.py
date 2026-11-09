@@ -33,10 +33,10 @@ FILE_FIELDS = (
 )
 
 FORM_FIELDS = (
+    "Action",
     "Company",
     "Job",
     "Deadline",
-    "Action",
     "Target",
     "Brief",
     "Portal",
