@@ -26,7 +26,10 @@ def weekly_agenda(records: list[ApplicationRecord], *, today: date | None = None
             parsed = _parse_deadline_or_none(due)
             if parsed is None or parsed.date() > sunday:
                 continue
-            if parsed.date() < today and not record.next:
+            if parsed.date() < today and not record.next and record.action != "Wait":
+                # Missed original application deadlines are not proof that
+                # unsubmitted jobs remain actionable. A submitted Wait entry
+                # with an elapsed cutoff *does* warrant a status review.
                 continue
         items.append({
             "id": record.id,
