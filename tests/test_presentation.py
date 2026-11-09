@@ -35,10 +35,10 @@ def make_record(**overrides):
 
 def test_form_fields_are_plain_one_word_rows_in_expected_order():
     assert FORM_FIELDS == (
+        "Action",
         "Company",
         "Job",
         "Deadline",
-        "Action",
         "Target",
         "Brief",
         "Portal",
