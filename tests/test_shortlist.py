@@ -202,3 +202,68 @@ def test_shortlist_keeps_non_json_manifest_even_in_downloads(tmp_path, monkeypat
     cli.main(["shortlist", str(file)])
     assert file.exists()
     assert store.get("check").action == "Apply"
+
+
+
+def test_shortlist_schedules_this_sunday_except_earlier_cutoffs(tmp_path):
+    from datetime import date
+
+    store = CareerStore(tmp_path / "scheduled")
+    candidates = (
+        ("future-exact", "2026-12-31", "2026-11-15"),
+        ("future-month", "2026-12", "2026-11-15"),
+        ("future-spring", "2027-spring", "2026-11-15"),
+        ("deadline-before-sunday", "2026-11-13 19:30", "2026-11-13 19:30"),
+        ("expired-exact", "2026-10-25", "2026-10-25"),
+        ("expired-month", "2026-09", "2026-09-06"),
+        ("unknown", "", "2026-11-15"),
+    )
+    for ident, cutoff, _ in candidates:
+        store.add(ApplicationRecord(
+            id=ident, company="C" + ident, job="Analyst",
+            action="Check", deadline=cutoff, when="2026-fall",
+            next="2027-06-01", brief="original brief",
+        ))
+    promoted, skipped = store.shortlist(
+        manifest(*(ident for ident, _, _ in candidates)),
+        today=date(2026, 11, 9),
+    )
+    assert (promoted, skipped) == (7, 0)
+    for ident, cutoff, expected in candidates:
+        result = store.get(ident)
+        assert result.action == "Apply"
+        assert result.next == expected
+        assert result.deadline == cutoff
+        assert result.brief == "original brief"
+    assert store.shortlist(manifest("future-exact"),
+                           today=date(2026, 11, 10)) == (0, 1)
+    assert store.get("future-exact").next == "2026-11-15"
+
+
+def test_shortlist_preserves_intentional_asap_and_existing_actions(tmp_path):
+    from datetime import date
+
+    store = setup_store(tmp_path)
+    store.add(ApplicationRecord(
+        id="scheduled", company="Scheduled", job="Analyst",
+        action="Check", deadline="2026-12-31", next="2027-02-01",
+    ))
+    before = {r.id: r.to_dict() for r in store.list()}
+    assert store.shortlist(manifest("scheduled", "check", "wait", "apply"),
+                           today=date(2026, 11, 9)) == (2, 2)
+    assert store.get("scheduled").next == "2026-11-15"
+    assert store.get("check").next == "ASAP"
+    for ident in ("wait", "apply"):
+        assert store.get(ident).to_dict() == before[ident]
+
+
+def test_shortlist_day_of_week_rolls_next_week(tmp_path):
+    from datetime import date
+
+    store = CareerStore(tmp_path / "week")
+    store.add(ApplicationRecord(
+        id="a", company="Employer", job="Analyst", action="Check",
+        deadline="2027-01-01",
+    ))
+    store.shortlist(manifest("a"), today=date(2026, 11, 16))
+    assert store.get("a").next == "2026-11-22"
