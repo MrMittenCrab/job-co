@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
-from .model import ApplicationRecord, sort_records
+from .model import ApplicationRecord, sort_records, _parse_deadline_or_none
 from .importing import parse_import
 from .naming import application_stem, readable_folder_name
 from .timing import timing_precision
@@ -223,7 +223,13 @@ class CareerStore:
         if _preserve_existing_actions:
             # Import fields cannot change or normalize an existing Action.
             updated.action = old.action
-        updated.validate(preserve_action=_preserve_existing_actions)
+        preserve_legacy_deadline = (
+            bool(old.deadline)
+            and _parse_deadline_or_none(old.deadline) is None
+            and data.get("deadline") == old.deadline
+        )
+        updated.validate(preserve_action=_preserve_existing_actions,
+                         preserve_legacy_deadline=preserve_legacy_deadline)
 
         old_stem = application_stem(old.company, old.job)
         new_stem = application_stem(updated.company, updated.job)
