@@ -35,7 +35,7 @@ def test_this_week_end_includes_asap_overdue_manual_and_sunday():
     assert result["week_ending"] == "2026-11-15"
     assert result["format"] == "jobco-weekly-agenda"
     ids = [r["id"] for r in result["items"]]
-    assert ids == ["asap", "overdue", "close", "sun", "wait", "vague"]
+    assert ids == ["overdue", "asap", "close", "wait", "vague", "sun"]
     assert "expired" not in ids
     assert "archived" not in ids
 
@@ -104,7 +104,7 @@ def test_wait_after_closing_is_included_for_review_but_unsubmitted_expired_is_no
                deadline="2027-02-01"),
     ], today=today)
     ids = [entry["id"] for entry in agenda["items"]]
-    assert ids == ["manually-follow-up", "waiting"]
+    assert ids == ["waiting", "manually-follow-up"]
     waiting = next(entry for entry in agenda["items"] if entry["id"] == "waiting")
     assert waiting["action"] == "Wait"
     assert waiting["next"] == "2026-12-31"

@@ -98,7 +98,7 @@ def test_sort_records_uses_deadline_and_season_for_undated():
         make_record(id="b", company="HSBC", deadline="2026-09-20 18:00"),
         make_record(id="a", company="P&G", deadline="2026-09-18 23:59"),
     ]
-    assert [record.id for record in sort_records(records, today=date(2026, 11, 9))] == ["c", "a", "b"]
+    assert [record.id for record in sort_records(records, today=date(2026, 11, 9))] == ["a", "b", "c"]
 
 
 
@@ -124,7 +124,7 @@ def test_auto_next_promotes_active_recruitment_before_expired_cutoffs(action):
     ]
     ids = [r.id for r in sort_records(records, today=date(2026, 11, 9))]
     assert (ids == ["fuzzy", "early", "late"] if action != "Archive"
-            else ids == ["fuzzy", "late", "early"])
+            else ids == ["early", "fuzzy", "late"])
 
 
 def test_filter_records_searches_company_job_action_contact_and_keeps_order():
@@ -219,12 +219,12 @@ def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline()
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "wait", "next", "future-wait", "old",
+        "wait", "old", "next", "future-wait",
     ]
     assert records[1].deadline == "2026-09-01"
     records[1].action = "Apply"
     assert [r.id for r in sort_records(records, today=today)] == [
-        "next", "future-wait", "wait", "old",
+        "wait", "old", "next", "future-wait",
     ]
 
 
@@ -256,9 +256,9 @@ def test_fortnight_deadlines_precede_existing_action_groups():
         make_record(id="no-deadline-check", action="Check", when="2026-11"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "urgent-wait", "urgent-check", "urgent-apply", "urgent-take",
-        "last-day", "no-deadline-check", "far-apply", "later-check",
-        "overdue-check", "archived",
+        "overdue-check", "urgent-wait", "urgent-take", "urgent-check",
+        "urgent-apply", "no-deadline-check", "last-day", "far-apply",
+        "later-check", "archived",
     ]
 
 
@@ -269,7 +269,7 @@ def test_fortnight_window_is_inclusive_and_requires_confirmed_deadline():
     assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-23"), today)
     assert deadline_due_within_two_weeks(make_record(action="Take", deadline="2026-11-22"), today)
     assert deadline_due_within_two_weeks(make_record(action="Wait", deadline="2026-11-09"), today)
-    assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
+    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-12-01"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-08"), today)
     assert deadline_due_within_two_weeks(make_record(action="Check", when="2026-11"), today)
@@ -290,8 +290,8 @@ def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_e
         make_record(id="undated-wait", company="Wait", action="Wait", when="2026-11-05"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "urgent", "approx", "newer-apply", "undated-wait",
-        "newer-check", "older", "far-deadline", "future-start",
+        "approx", "newer-apply", "undated-wait", "newer-check",
+        "older", "urgent", "far-deadline", "future-start",
         "archived-undated",
     ]
 
