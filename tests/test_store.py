@@ -164,3 +164,42 @@ def test_update_description_text_does_not_replace_description_file(tmp_path):
     assert updated.brochure == "HSBC_Global-Banking-Graduate_Brochure.pdf"
     folder = store.applications_dir / "HSBC - Global Banking Graduate"
     assert (folder / updated.brochure).read_text() == "file contents"
+
+
+def test_legacy_asap_record_list_and_edit_preserve_original_value(tmp_path):
+    store = CareerStore(tmp_path / "Career")
+    payload = store._document()
+    payload["jobs"] = [{
+        "id": "jpm-legacy", "company": "J.P. Morgan Asset Management",
+        "job": "China Seasonal Research Analyst", "deadline": "ASAP",
+        "action": "Wait", "when": "2026-fall",
+        "folder_name": "JPM - China Seasonal Research",
+    }]
+    store._write(payload)
+
+    records = store.list()  # Previously raised ValueError during sorting.
+    assert len(records) == 1
+    assert records[0].deadline == "ASAP"
+
+    changed = store.update("jpm-legacy", {"action": "Check"})
+    assert changed.action == "Check"
+    assert changed.deadline == "ASAP"
+
+    corrected = store.update("jpm-legacy", {"deadline": "", "brief": "Original deadline listed ASAP"})
+    assert corrected.deadline == ""
+    assert corrected.brief == "Original deadline listed ASAP"
+    assert store.get("jpm-legacy").deadline == ""
+
+
+def test_legacy_asap_record_rejects_new_invalid_deadline_on_edit(tmp_path):
+    store = CareerStore(tmp_path / "Career")
+    payload = store._document()
+    payload["jobs"] = [{
+        "id": "jpm-legacy", "company": "JPMAM", "job": "Research",
+        "deadline": "ASAP", "action": "Wait", "when": "2026-fall",
+        "folder_name": "JPM - Research",
+    }]
+    store._write(payload)
+    with pytest.raises(ValueError, match="Deadline examples"):
+        store.update("jpm-legacy", {"deadline": "SOMEDAY"})
+    assert store.get("jpm-legacy").deadline == "ASAP"
