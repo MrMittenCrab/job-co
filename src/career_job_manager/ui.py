@@ -423,6 +423,7 @@ class HomeScreen(Screen):
     BINDINGS = [
         ("up", "move_up", "Up"),
         ("down", "move_down", "Down"),
+        ("t", "today", "Today"),
         ("right", "open_selected", "Open"),
         ("a", "add_application", "Add"),
         ("c", "open_company", "Company"),
@@ -445,7 +446,7 @@ class HomeScreen(Screen):
         yield Static("APPLICATIONS", id="home-title")
         yield ApplicationList(id="applications")
         yield SearchInput(placeholder="Search", id="search")
-        yield Static("a add   → open   c company   / search   d delete   q quit", id="home-help")
+        yield Static("t Today   a add   → open   c company   / search   d delete   q quit", id="home-help")
 
     def on_mount(self) -> None:
         self.query_one("#search", SearchInput).styles.display = "none"
@@ -501,6 +502,22 @@ class HomeScreen(Screen):
 
     def action_move_down(self) -> None:
         self.action_move(1)
+
+    def action_today(self) -> None:
+        """Jump to the current top-priority job and clear any active search."""
+        search = self.query_one("#search", SearchInput)
+        # A printable t in a focused search input must remain text input.
+        if search.has_focus:
+            return
+        if search.value:
+            search.value = ""
+            search.styles.display = "none"
+            self.refresh_list()
+        widget = self.query_one("#applications", ApplicationList)
+        widget.selected_index = 0
+        widget.first_visible = 0
+        widget.refresh()
+        widget.focus()
 
     def action_move(self, delta: int) -> None:
         if self.query_one("#search", SearchInput).has_focus:
