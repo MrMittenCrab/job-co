@@ -219,7 +219,7 @@ def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline()
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "next", "wait", "future-wait", "old",
+        "wait", "next", "future-wait", "old",
     ]
     assert records[1].deadline == "2026-09-01"
     records[1].action = "Apply"
@@ -256,7 +256,7 @@ def test_fortnight_deadlines_precede_existing_action_groups():
         make_record(id="no-deadline-check", action="Check", when="2026-11"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "urgent-check", "urgent-apply", "urgent-wait", "urgent-take",
+        "urgent-wait", "urgent-check", "urgent-apply", "urgent-take",
         "last-day", "no-deadline-check", "far-apply", "later-check",
         "overdue-check", "archived",
     ]

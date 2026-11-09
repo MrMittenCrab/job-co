@@ -313,11 +313,18 @@ def default_next(record: ApplicationRecord, today: date) -> str:
     if record.action == "Archive":
         return ""
     sunday = end_of_current_week(today)
-    if record.action not in {"Apply", "Check"}:
+    # A submitted Wait job uses its known application cutoff as a
+    # checkpoint, exact or vague. An elapsed cutoff prompts review, not
+    # an automatic assumption of rejection.
+    if record.action == "Wait" and not record.deadline:
+        return sunday.isoformat()
+    if record.action not in {"Apply", "Check", "Wait"}:
         return sunday.isoformat()
     raw = record.deadline
     parsed = _parse_deadline_or_none(raw)
     if parsed:
+        if record.action == "Wait":
+            return raw
         due = parsed.date()
         if due < today:
             return raw  # Expired deadline: never silently create a fresh opening.

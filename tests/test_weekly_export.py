@@ -92,3 +92,21 @@ def test_export_cli_hyphen_alias_and_existing_full_export(tmp_path, monkeypatch)
     assert "companies" in snapshot
     assert len(snapshot["jobs"]) == 1
     assert "items" not in snapshot
+
+
+def test_wait_after_closing_is_included_for_review_but_unsubmitted_expired_is_not():
+    today = date(2027, 1, 4)
+    agenda = weekly_agenda([
+        record("waiting", action="Wait", deadline="2026-12-31"),
+        record("unsubmitted", action="Apply", deadline="2026-12-31"),
+        record("future-wait", action="Wait", deadline="2027-02-01"),
+        record("manually-follow-up", action="Wait", next="ASAP",
+               deadline="2027-02-01"),
+    ], today=today)
+    ids = [entry["id"] for entry in agenda["items"]]
+    assert ids == ["manually-follow-up", "waiting"]
+    waiting = next(entry for entry in agenda["items"] if entry["id"] == "waiting")
+    assert waiting["action"] == "Wait"
+    assert waiting["next"] == "2026-12-31"
+    assert waiting["deadline"] == "2026-12-31"
+    assert waiting["next_source"] == "automatic"
