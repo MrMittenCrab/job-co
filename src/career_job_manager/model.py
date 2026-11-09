@@ -313,6 +313,13 @@ def default_next(record: ApplicationRecord, today: date) -> str:
     if record.action == "Archive":
         return ""
     sunday = end_of_current_week(today)
+    # Once submitted, the original closing date is a conservative checkpoint:
+    # wait until the deadline unless the user explicitly sets an earlier Next.
+    # An elapsed cutoff prompts review; it does NOT mean a rejection occurred.
+    if record.action == "Wait":
+        if _parse_deadline_or_none(record.deadline):
+            return record.deadline
+        return sunday.isoformat()
     if record.action not in {"Apply", "Check"}:
         return sunday.isoformat()
     raw = record.deadline
