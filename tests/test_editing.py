@@ -66,3 +66,32 @@ def test_right_on_empty_text_and_selection():
     editor.move_right()
     assert editor.cursor == 3
     assert editor.value == "abc"
+
+
+
+def test_select_all_and_replace_a_long_portal_in_one_paste():
+    old_url = "https://jobs.citi.com/job/hong-kong/wealth-citigold-summer-analyst/287/99664839024"
+    new_url = "https://jobs.citi.com/job/hong-kong/wealth-citigold-summer-analyst/287/102161047888"
+    editor = InlineBuffer.from_value(old_url)
+    editor.select_all()
+    assert editor.all_selected
+    editor.insert(new_url)
+    assert editor.value == new_url
+    assert not editor.all_selected
+
+
+def test_select_all_then_backspace_clears_only_field_value():
+    editor = InlineBuffer.from_value("https://example.com/very/long/url")
+    editor.select_all()
+    editor.backspace()
+    assert editor.value == ""
+    assert editor.cursor == 0
+
+
+def test_arrow_keys_exit_selection_without_erasing_text():
+    editor = InlineBuffer.from_value("HSBC")
+    editor.select_all()
+    editor.move_left()
+    assert not editor.all_selected
+    assert editor.cursor == 0
+    assert editor.value == "HSBC"
