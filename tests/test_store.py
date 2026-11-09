@@ -179,15 +179,17 @@ def test_legacy_asap_record_list_and_edit_preserve_original_value(tmp_path):
 
     records = store.list()  # Previously raised ValueError during sorting.
     assert len(records) == 1
-    assert records[0].deadline == "ASAP"
+    assert records[0].deadline == ""
+    assert records[0].next == "ASAP"
 
     changed = store.update("jpm-legacy", {"action": "Check"})
     assert changed.action == "Check"
-    assert changed.deadline == "ASAP"
+    assert changed.deadline == ""
+    assert changed.next == "ASAP"
 
-    corrected = store.update("jpm-legacy", {"deadline": "", "brief": "Original deadline listed ASAP"})
-    assert corrected.deadline == ""
-    assert corrected.brief == "Original deadline listed ASAP"
+    corrected = store.update("jpm-legacy", {"next": "", "brief": "Original schedule listed ASAP"})
+    assert corrected.next == ""
+    assert corrected.brief == "Original schedule listed ASAP"
     assert store.get("jpm-legacy").deadline == ""
 
 
@@ -202,4 +204,32 @@ def test_legacy_asap_record_rejects_new_invalid_deadline_on_edit(tmp_path):
     store._write(payload)
     with pytest.raises(ValueError, match="Deadline examples"):
         store.update("jpm-legacy", {"deadline": "SOMEDAY"})
-    assert store.get("jpm-legacy").deadline == "ASAP"
+    assert store.get("jpm-legacy").deadline == ""
+    assert store.get("jpm-legacy").next == "ASAP"
+
+
+def test_update_next_does_not_change_application_deadline(tmp_path):
+    store = CareerStore(tmp_path / "Career")
+    store.add(make_record(id="next-test", deadline="2026-11-13", next="ASAP"))
+    changed = store.update("next-test", {"action": "Take", "next": "2026-11-12"})
+    assert changed.deadline == "2026-11-13"
+    assert changed.next == "2026-11-12"
+    assert store.get("next-test").action == "Take"
+
+
+def test_manual_next_does_not_get_overwritten_by_import(tmp_path):
+    store = CareerStore(tmp_path / "Career")
+    payload = {"schema_version": 1, "jobs": [
+        {"id": "hsbc-2027", "company": "HSBC", "role": "Investment Specialist",
+         "when": "2026-fall", "deadline": "2026-11-13"}
+    ]}
+    store.import_jobs(payload)
+    old = next(r for r in store.list() if r.import_id == "hsbc-2027")
+    assert old.deadline == "2026-11-13"
+    assert old.next == ""
+    store.update(old.id, {"action": "Take", "next": "ASAP"})
+    store.import_jobs(payload)
+    now = store.get(old.id)
+    assert now.action == "Take"
+    assert now.next == "ASAP"
+    assert now.deadline == "2026-11-13"

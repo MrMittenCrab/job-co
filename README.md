@@ -46,11 +46,18 @@ job import file.json
 
 `id`, `company`, `role`, and `when` are required nonempty strings. `deadline`, `url`, and `description` are optional strings. Action remains protected; optional matching metadata and unknown fields are retained. The complete input is validated before importing.
 
-New IDs create jobs with **Check**. Reusing an ID updates its imported fields while preserving the current Action, contact, Target, and attachments. Omitted optional fields retain their existing values; explicit empty strings clear URL and description, but preserve an existing Deadline. Re-imports preserve more precise timing: exact date > month > range/season. Repeated imports do not create duplicates, and jobs absent from a file remain untouched. IDs are matched exactly, with no company/role matching. Imported jobs use the same database and normal edit screen as manual jobs. URL fills Portal; description fills the existing editable Description text, leaving its attachment slot intact.
+New IDs create jobs with **Check**. Reusing an ID updates its imported fields while preserving the current Action, manually entered Next, contact, Target, and attachments. External `deadline` fields populate the permanent application Deadline. Omitted optional fields retain their existing values; explicit empty strings clear URL and description, but preserve an existing Deadline. Re-imports preserve more precise timing: exact date > month > range/season. Repeated imports do not create duplicates, and jobs absent from a file remain untouched. IDs are matched exactly, with no company/role matching. Imported jobs use the same database and normal edit screen as manual jobs. URL fills Portal; description fills the existing editable Description text, leaving its attachment slot intact.
 
 `when` accepts an exact date (`2026-10-31`), a month (`2026-10`), an inclusive month range (`2026-09..2026-10`), or a season (`2026-fall`). Seasons are spring (March–May), summer (June–August), fall (September–November), and winter (December–February of the following year). `2026-winter` therefore begins in December 2026. Ranges may cross years. No recruitment dates or recurrence are inferred.
 
-The existing homepage date cell displays an exact Deadline when present; otherwise it displays `when` as `31 Oct`, `~Oct`, `~Sep–Oct`, or `~Fall`. Non-archived records with a confirmed explicit Deadline from today through fourteen calendar days ahead (inclusive) appear first, sorted together by their actual deadline regardless of Action (including Apply and Check). No estimated deadlines or "when" periods count as urgent. **Second**, undated Apply or Check jobs whose recorded recruitment timing has already begun appear next. Those are sorted by the start of recorded `when` timing, most recent first (then more precise timing; Apply before Check on exact ties). These entries need vacancy verification: recorded timing is not proof a role is still open, and is never treated as a deadline. Future recruitment timing is not promoted. **Third**, all remaining jobs retain the original order: actions other than Check first, followed by Check. Within this remaining group, exact dates sort chronologically before approximate periods; approximate periods sort by precision and the start of `when`. Deadline takes precedence over `when`. **Wait** is a scheduling exception outside the urgent fourteen-day deadline window: if its deadline or approximate timing is today or earlier, the ordinary home list treats it as tomorrow for sorting and initial selection. The original date remains visible and unchanged in storage. Other actions retain their normal chronological order. Only jobs with neither receive the current season as stored timing; existing deadlines remain unchanged. January and February belong to the winter that began the previous December. No fake Deadline or additional form field is created. **Historical invalid deadlines** such as `ASAP` display verbatim but are not treated as confirmed calendar deadlines. They use the recorded `when` period for ordering and never crash JOB. Existing records with these values can still be edited without changing the text; new or changed deadlines must be valid dates. Replace a legacy non-date Deadline with a real date or leave it blank and retain the original note in Brief.
+The JOB home list is sorted by **Next**, the due date for the current Action, rather than by the original application cutoff. The only user-facing date fields are **Next** and **Deadline**.
+
+- **Next** (second row, immediately after Action) is an exact next-action date/time or `ASAP`. It may be set manually. `ASAP` is highest urgency and is not converted to an invented day. Changing Action resets Next to an automatic schedule for the new stage, unless you then set a specific Next.
+- **Deadline** (third row) is the original application cutoff and never changes just because the Action changes. It accepts exact dates and approximate periods such as `2026-11`, `2026-fall`, `Fall 2026` and `2026-10..2026-11`. It does **not** accept `ASAP`.
+- When Next has no user-entered value, Apply and Check use Deadline or the imported `when` recruitment period. If that period is current, or the exact cutoff is later in the current season, Next defaults to **the coming Sunday**, capped at any earlier exact cutoff. For a future recruitment period it defaults to that period's first day; for an expired application cutoff it retains the expired date without inventing a fresh opening. Wait, Take, Go, Respond and Email default to the coming Sunday for a new weekly follow-up or action.
+- Automatic Next is calculated each time the queue opens, **not stored as a permanent date** merely because you viewed or saved the job. If you explicitly edit Next, the entered date/ASAP overrides the automatic value. Clear Next to restore its rolling default.
+- Home displays Next, and orders by it: active ASAP first; explicitly overdue actions next; current/future dated Next entries in chronological order; auto-expired application cutoffs afterward; Archive last. The first row is selected when JOB opens. Where dates tie, non-Check actions precede Check and manually scheduled actions precede automatically scheduled ones.
+- Historical records retain their existing Deadline text because those values previously mixed application, assessment and follow-up dates. **No automatic stage reclassification** is performed. Only a historical `Deadline = ASAP` is safely moved to `Next = ASAP`, since ASAP is a scheduling instruction, not an application closing date. Existing IDs, actions, documents and Portal URLs remain unchanged.
 
 Data lives under:
 
@@ -63,7 +70,7 @@ Data lives under:
 ```text
 APPLICATIONS
 
-  Deadline        Company        Job                         Action
+  Next            Company        Job                         Action
 > Sep 18 23:59    P&G            Finance Graduate            Apply
   Sep 20 18:00    HSBC           Global Banking Graduate     Take
   Sep 25 14:00    BCG            Associate                   Go
@@ -92,10 +99,14 @@ For Resume, Letter, Form, and Brochure, Right enters the View / Choose row with 
 HSBC — Global Banking Graduate
 
 > Action       Wait
+  Next         15 Nov
+  Deadline     25 Sep
+  Target       —
+  Brief        —
+  Portal       https://company.com/my-applications
+  Contact      Jane Smith
   Company      HSBC
   Job          Global Banking Graduate
-  Deadline     Sep 25
-  Portal       https://company.com/my-applications
   Contact      Jane Smith
 
   Resume       HSBC_Global-Banking-Graduate_Resume.docx
@@ -106,13 +117,13 @@ HSBC — Global Banking Graduate
                advisory work. Full text wraps below.
 ```
 
-The detail screen starts with **Action**, followed by Company, Job and Deadline. Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Editing an existing Portal or Target automatically selects its entire value: pasting a new link replaces the old link, and Backspace/Delete clears it. Press Left or Right to cancel the selection if you only want to change part of the URL. When a terminal forwards Cmd+A (`super+a`) to Textual, it selects all within the focused field. Many macOS terminal apps intercept Cmd+A for terminal-wide selection, so job&co cannot reliably capture it. The earlier Ctrl+A handler has been removed. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
+The detail screen starts with **Action → Next → Deadline → Target → Brief → Portal → Contact**, followed by Company, Job, documents and Description. Text fields accept typing as soon as they are focused. Use arrows or Tab/Shift+Tab to navigate, and Enter to save and return home. q quits outside text editing; Escape never quits. Editing an existing Portal or Target automatically selects its entire value: pasting a new link replaces the old link, and Backspace/Delete clears it. Press Left or Right to cancel the selection if you only want to change part of the URL. When a terminal forwards Cmd+A (`super+a`) to Textual, it selects all within the focused field. Many macOS terminal apps intercept Cmd+A for terminal-wide selection, so job&co cannot reliably capture it. The earlier Ctrl+A handler has been removed. Normal terminal paste works; ordinary text fields collapse pasted line breaks and tabs to spaces.
 
 On Action, Right opens the existing dropdown. Up/Down move the highlight; Left or Right commits the highlighted option and closes the dropdown. Enter commits the highlighted option and closes the dropdown; press Enter again to save and return home. Actions are Apply, Wait, Take, Go, Respond, Archive, Email, and Check. Manual applications default to Apply; JSON imports start at Check.
 
 Target is shown for Apply, Take, Go, Respond, Email, and Check. For Email, enter an email address such as `hr@example.com`. Wait and Archive hide Target. Manual jobs clear it as before; imported URLs are stored in Portal regardless of Action.
 
-Deadline accepts inputs such as `Sep 25`, `Sep 25 14:00`, `Sep 25, 2:30pm`, `25 Sep`, and ISO dates. Missing years use the current year; commas and odd spacing are tolerated.
+Deadline accepts dates and approximate recruitment periods (`2026-11`, `2026-fall`, `Fall 2026`, `2026-10..2026-11`), but not ASAP. Next accepts dates/times and ASAP, not vague periods. Missing years on exact dates use the current year; commas and odd spacing are tolerated. Editing Next automatically selects its entire current value for immediate replacement.
 
 ## Description
 

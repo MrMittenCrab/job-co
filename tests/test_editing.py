@@ -107,3 +107,13 @@ def test_arrow_cancels_url_selection_without_deleting_value():
     assert not editor.all_selected
     editor.insert("/jobs")
     assert editor.value == "https://example.com/jobs"
+
+
+def test_next_auto_selects_for_one_step_replacement():
+    from career_job_manager.editing import editor_for_field
+
+    editor = editor_for_field("Next", "2026-11-15")
+    assert editor.all_selected
+    editor.insert("ASAP")
+    assert editor.value == "ASAP"
+    assert not editor.all_selected

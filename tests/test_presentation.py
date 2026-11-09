@@ -36,13 +36,14 @@ def make_record(**overrides):
 def test_form_fields_are_plain_one_word_rows_in_expected_order():
     assert FORM_FIELDS == (
         "Action",
-        "Company",
-        "Job",
+        "Next",
         "Deadline",
         "Target",
         "Brief",
         "Portal",
         "Contact",
+        "Company",
+        "Job",
         "Resume",
         "Letter",
         "Form",
@@ -50,7 +51,8 @@ def test_form_fields_are_plain_one_word_rows_in_expected_order():
         "DescriptionText",
     )
     assert TEXT_FIELDS == (
-        "Company", "Job", "Deadline", "Target", "Brief", "Portal", "Contact", "DescriptionText"
+        "Next", "Deadline", "Target", "Brief", "Portal",
+        "Contact", "Company", "Job", "DescriptionText"
     )
     assert FILE_FIELDS == ("Resume", "Letter", "Brochure", "Form")
 

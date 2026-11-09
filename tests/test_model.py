@@ -101,33 +101,30 @@ def test_sort_records_uses_deadline_and_season_for_undated():
     assert [record.id for record in sort_records(records, today=date(2026, 11, 9))] == ["c", "a", "b"]
 
 
+
 @pytest.mark.parametrize("action", ["Apply", "Wait", "Take", "Go", "Respond", "Email"])
-@pytest.mark.parametrize("timing", [
-    {"deadline": "2027-10-01"},
-    {"when": "2027-fall"},
-])
 @pytest.mark.parametrize("query", ["", "HSBC"])
-def test_active_actions_precede_check_regardless_of_time(action, timing, query):
+def test_next_drives_sort_independent_of_action_and_archive_is_last(action, query):
     records = [
-        make_record(id="check", action="Check", deadline="2026-01-01"),
-        make_record(id="active", action=action, **timing),
-        make_record(id="archive", action="Archive", deadline="2025-01-01"),
+        make_record(id="check", action="Check", next="2026-11-12"),
+        make_record(id="active", action=action, next="2026-11-16"),
+        make_record(id="archive", action="Archive", next="ASAP"),
     ]
-    assert [record.id for record in filter_records(records, query)] == [
-        "archive", "active", "check",
+    assert [r.id for r in filter_records(records, query)] == [
+        "check", "active", "archive",
     ]
 
 
 @pytest.mark.parametrize("action", ["Apply", "Check", "Archive"])
-def test_action_groups_preserve_exact_then_fuzzy_time_order(action):
+def test_auto_next_promotes_active_recruitment_before_expired_cutoffs(action):
     records = [
         make_record(id="fuzzy", action=action, when="2026-01"),
         make_record(id="late", action=action, deadline="2026-10-01"),
         make_record(id="early", action=action, deadline="2026-09-01"),
     ]
-    expected = (["fuzzy", "early", "late"] if action in {"Apply", "Check"}
-                else ["early", "late", "fuzzy"])
-    assert [record.id for record in sort_records(records, today=date(2026, 11, 9))] == expected
+    ids = [r.id for r in sort_records(records, today=date(2026, 11, 9))]
+    assert (ids == ["fuzzy", "early", "late"] if action != "Archive"
+            else ids == ["fuzzy", "late", "early"])
 
 
 def test_filter_records_searches_company_job_action_contact_and_keeps_order():
@@ -222,12 +219,12 @@ def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline()
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "next", "old", "wait", "future-wait",
+        "next", "wait", "future-wait", "old",
     ]
     assert records[1].deadline == "2026-09-01"
     records[1].action = "Apply"
     assert [r.id for r in sort_records(records, today=today)] == [
-        "next", "wait", "old", "future-wait",
+        "next", "future-wait", "wait", "old",
     ]
 
 
@@ -259,9 +256,9 @@ def test_fortnight_deadlines_precede_existing_action_groups():
         make_record(id="no-deadline-check", action="Check", when="2026-11"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "urgent-wait", "urgent-take", "urgent-check", "urgent-apply",
-        "last-day", "no-deadline-check", "archived", "far-apply",
-        "overdue-check", "later-check",
+        "urgent-check", "urgent-apply", "urgent-wait", "urgent-take",
+        "last-day", "no-deadline-check", "far-apply", "later-check",
+        "overdue-check", "archived",
     ]
 
 
@@ -272,9 +269,10 @@ def test_fortnight_window_is_inclusive_and_requires_confirmed_deadline():
     assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-23"), today)
     assert deadline_due_within_two_weeks(make_record(action="Take", deadline="2026-11-22"), today)
     assert deadline_due_within_two_weeks(make_record(action="Wait", deadline="2026-11-09"), today)
-    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
+    assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
+    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-12-01"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-08"), today)
-    assert not deadline_due_within_two_weeks(make_record(action="Check", when="2026-11"), today)
+    assert deadline_due_within_two_weeks(make_record(action="Check", when="2026-11"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Archive", deadline="2026-11-11"), today)
 
 
@@ -292,8 +290,9 @@ def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_e
         make_record(id="undated-wait", company="Wait", action="Wait", when="2026-11-05"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "urgent", "newer-apply", "newer-check", "approx", "older",
-        "archived-undated", "undated-wait", "far-deadline", "future-start",
+        "urgent", "approx", "newer-apply", "undated-wait",
+        "newer-check", "older", "future-start", "far-deadline",
+        "archived-undated",
     ]
 
 
@@ -334,12 +333,28 @@ def test_invalid_legacy_deadline_is_not_treated_as_confirmed_urgency():
     )
     today = date(2026, 11, 9)
     invalid = make_record(action="Check", deadline="ASAP", when="2026-11")
-    assert not deadline_due_within_two_weeks(invalid, today)
+    assert deadline_due_within_two_weeks(invalid, today)
     assert undated_application_needing_review(invalid, today)
-    assert effective_queue_date(invalid, today) == date(2026, 11, 1)
+    assert effective_queue_date(invalid, today) == date(2026, 11, 15)
     assert [r.id for r in filter_records([invalid], "HSBC")] == ["1"]
 
 
 def test_new_nondatetime_deadlines_still_fail_strict_validation():
-    with pytest.raises(ValueError, match="Deadline examples"):
+    with pytest.raises(ValueError, match="Deadline cannot be ASAP"):
         make_record(deadline="ASAP").validate()
+
+
+def test_deadline_accepts_vague_periods_but_not_asap():
+    assert normalize_deadline("2026-fall") == "2026-fall"
+    assert normalize_deadline("Fall 2026") == "2026-fall"
+    assert normalize_deadline("2026-11") == "2026-11"
+    assert normalize_deadline("Nov 2026") == "2026-11"
+    assert normalize_deadline("2026-10..2026-11") == "2026-10..2026-11"
+
+
+def test_next_supports_asap_but_disallows_approximate_periods():
+    from career_job_manager.model import normalize_next
+    assert normalize_next("asap") == "ASAP"
+    assert normalize_next("2026-11-13") == "2026-11-13"
+    with pytest.raises(ValueError):
+        normalize_next("2026-fall")
