@@ -84,3 +84,13 @@ class InlineBuffer:
 
     def render(self) -> str:
         return self.value[: self.cursor] + "│" + self.value[self.cursor :]
+
+
+def editor_for_field(field: str, value: str) -> InlineBuffer:
+    """Prepare an editor; URLs start selected for single-step replacement."""
+    editor = InlineBuffer.from_value(value)
+    if field in {"Portal", "Target"}:
+        editor.select_all()
+    else:
+        editor.move_home()
+    return editor
