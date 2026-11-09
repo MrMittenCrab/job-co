@@ -14,7 +14,7 @@ from textual.widgets import Input, Static
 
 from .editing import InlineBuffer, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, effective_queue_date, filter_records
+from .model import ApplicationRecord, action_uses_target, application_due_this_week, effective_queue_date, filter_records
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -451,20 +451,26 @@ class HomeScreen(Screen):
         self.query_one("#search", SearchInput).styles.display = "none"
         self.refresh_list()
         widget = self.query_one("#applications", ApplicationList)
-        # Select once per screen, without changing display order or detail return.
-        for exact in (True, False):
-            candidates = []
-            for index, record in enumerate(self.visible_records):
-                if bool(record.deadline) != exact:
-                    continue
-                day = effective_queue_date(record, self.created_today)
-                if day > self.created_today:
-                    candidates.append((day, index))
-            if candidates:
-                _, widget.selected_index = min(candidates)
-                widget.first_visible = widget.selected_index
-                widget.refresh()
-                break
+        # Always start on the first urgent, still-to-apply opening when present.
+        if self.visible_records and application_due_this_week(self.visible_records[0], self.created_today):
+            widget.selected_index = 0
+            widget.first_visible = 0
+            widget.refresh()
+        else:
+            # Retain the previous nearest-upcoming selection when no urgent job exists.
+            for exact in (True, False):
+                candidates = []
+                for index, record in enumerate(self.visible_records):
+                    if bool(record.deadline) != exact:
+                        continue
+                    day = effective_queue_date(record, self.created_today)
+                    if day > self.created_today:
+                        candidates.append((day, index))
+                if candidates:
+                    _, widget.selected_index = min(candidates)
+                    widget.first_visible = widget.selected_index
+                    widget.refresh()
+                    break
         widget.focus()
         watch_store(self, self.refresh_external)
 
