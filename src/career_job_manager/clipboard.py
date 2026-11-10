@@ -18,7 +18,10 @@ def copy_native_clipboard(text: str) -> bool:
     """
     if platform.system() != "Darwin":
         return False
-    subprocess.run(
-        ["pbcopy"], input=text, text=True, check=True, capture_output=True,
-    )
+    try:
+        subprocess.run(
+            ["pbcopy"], input=text, text=True, check=True, capture_output=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise OSError(f"pbcopy exited with status {exc.returncode}") from exc
     return True
