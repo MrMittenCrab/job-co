@@ -17,7 +17,7 @@ bash scripts/install.sh
 job
 ```
 
-Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **a** to add, and **q** to quit. Run `company` for the companion company tracker.
+Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **a** to add, and **q** to quit. In an editing field, **Ctrl+A** selects text and **Ctrl+Y** copies the field to the system clipboard; **⌘C** also works if your terminal forwards it. Run `company` for the companion company tracker.
 
 ## Weekly shortlist
 
