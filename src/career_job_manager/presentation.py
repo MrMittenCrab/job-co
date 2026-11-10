@@ -10,7 +10,7 @@ VALUE_COLUMN = 15
 MOUSE_ENABLED = False
 SELECTOR_ACTIVATION_KEYS = ("right",)
 ACTION_COLORS = {
-    "Apply": "green", "Email": "green", "Wait": "green",
+    "Apply": "green", "Email": "green", "Wait": "yellow",
     "Go": "red", "Take": "red", "Check": "white", "Archive": "white",
 }
 DESCRIPTION_TEXT_FIELD = "DescriptionText"
