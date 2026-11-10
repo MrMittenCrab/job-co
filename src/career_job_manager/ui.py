@@ -684,7 +684,7 @@ class ApplicationScreen(Screen[bool]):
         with VerticalScroll(id="form-list"):
             for field in FORM_FIELDS:
                 yield FieldRow(field, self.values[field])
-        yield Static("↑ ↓ / Tab navigate   → enter   ← back   c company   Enter finish   q quit", id="form-help")
+        yield Static("↑↓ move   → edit   Ctrl+A select   Ctrl+Y copy   Enter finish   ← back   q quit", id="form-help")
 
     def on_mount(self) -> None:
         self._sync_target_visibility()
