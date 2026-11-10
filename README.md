@@ -50,7 +50,7 @@ New IDs create jobs with **Check**. Reusing an ID updates its imported fields wh
 
 `when` accepts an exact date (`2026-10-31`), a month (`2026-10`), an inclusive month range (`2026-09..2026-10`), or a season (`2026-fall`). Seasons are spring (March–May), summer (June–August), fall (September–November), and winter (December–February of the following year). `2026-winter` therefore begins in December 2026. Ranges may cross years. No recruitment dates or recurrence are inferred.
 
-The JOB home list is sorted by **Next**, the due date for the current Action, rather than by the original application cutoff. The only user-facing date fields are **Next** and **Deadline**.
+The JOB home list is sorted by **Next**, the due date for the current Action, rather than by the original application cutoff. The only user-facing date fields are **Next** and **Deadline**. Search (`/`) filters **all** matching records, including multiple jobs at the same employer with different actions; each query change resets the results to the first matching row so an old scroll offset cannot hide another match. Arrow keys navigate the filtered results, and clearing search restores the full list.
 
 - **Next** (second row, immediately after Action) is an exact next-action date/time or `ASAP`. It may be set manually. `ASAP` is highest urgency and is not converted to an invented day. Changing Action preserves a manually entered Next date or `ASAP`; an automatic Next stays automatic. To deliberately reschedule, edit Next yourself.
 - **Deadline** (third row) is the original application cutoff and never changes just because the Action changes. It accepts exact dates and approximate periods such as `2026-11`, `2026-fall`, `Fall 2026` and `2026-10..2026-11`. It does **not** accept `ASAP`.
