@@ -443,6 +443,7 @@ class HomeScreen(Screen):
         self.visible_records: list[ApplicationRecord] = []
         self.opened_record_id: str | None = None
         self.created_today = date.today()
+        self._last_search_query = ""
 
     def compose(self) -> ComposeResult:
         yield Static("APPLICATIONS", id="home-title")
@@ -472,12 +473,12 @@ class HomeScreen(Screen):
 
     def refresh_list(self) -> None:
         search = self.query_one("#search", SearchInput)
+        query = search.value.strip().casefold()
         records = self.store.list()
         self.visible_records = filter_records(records, search.value)
-        if search.value.strip():
+        if query:
             from .company import resolve
             companies = self.store.companies()
-            query = search.value.strip().casefold()
             matching = {record.id for record in self.visible_records}
             for record in records:
                 employer = resolve(companies, record.company_id, record.company)
@@ -490,7 +491,15 @@ class HomeScreen(Screen):
             companies = self.store.companies()
             self.visible_records = [r for r in self.visible_records
                                     if (resolve(companies, r.company_id, r.company) or {}).get('id') == self.company_context['id']]
-        self.query_one("#applications", ApplicationList).set_records(self.visible_records)
+        widget = self.query_one("#applications", ApplicationList)
+        if query != self._last_search_query:
+            # A narrowed list is a new result set. Reusing the old scroll
+            # offset hid the first matching records (e.g. a recent Orbis Wait
+            # alongside an older Orbis Check). Always expose the first match.
+            widget.selected_index = 0
+            widget.first_visible = 0
+        self._last_search_query = query
+        widget.set_records(self.visible_records)
 
     def selected_record(self) -> ApplicationRecord | None:
         return self.query_one("#applications", ApplicationList).selected()
