@@ -12,6 +12,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Input, Static
 
+from .clipboard import copy_native_clipboard
 from .editing import InlineBuffer, editor_for_field, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
 from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records, today_position
@@ -345,10 +346,27 @@ class FieldRow(Static):
         elif key == "right":
             self.editor.move_right()
             self.refresh(layout=True)
-        elif key in {"super+a", "cmd+a"}:
-            # Cmd is available only if the terminal forwards it to Textual.
+        elif key in {"ctrl+a", "super+a", "cmd+a"}:
+            # Command-A works when forwarded; Control-A works in terminals
+            # that reserve Command keys for their own menus.
             self.editor.select_all()
             self.refresh(layout=True)
+        elif key in {"super+c", "cmd+c", "ctrl+y"}:
+            # The inline editor has an all-or-none selection, not a native
+            # terminal text selection. Copy the selected text, or the entire
+            # focused field when there is no selection, without a mouse.
+            copied = self.editor.value
+            if copied:
+                try:
+                    if not copy_native_clipboard(copied):
+                        self.app.copy_to_clipboard(copied)
+                except (OSError, RuntimeError) as exc:
+                    self.app.notify(f"Copy failed: {exc}", severity="error")
+                else:
+                    self.app.notify("Copied field to clipboard")
+            event.prevent_default()
+            event.stop()
+            return
         elif key == "home":
             self.editor.move_home()
             self.refresh(layout=True)
