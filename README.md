@@ -17,7 +17,7 @@ bash scripts/install.sh
 job
 ```
 
-Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **w** to show all pending (`Wait`) applications, **a** to add, and **q** to quit. In an editing field, **Ctrl+A** selects text and **Ctrl+Y** copies the field to the system clipboard; **⌘C** also works if your terminal forwards it. Run `company` for the companion company tracker.
+Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **a** to add, and **q** to quit. In an editing field, **Ctrl+A** selects text and **Ctrl+Y** copies the field to the system clipboard; **⌘C** also works if your terminal forwards it. Run `company` for the companion company tracker.
 
 ## Weekly shortlist
 
@@ -27,4 +27,4 @@ job export this-week
 job shortlist
 ```
 
-`job shortlist` schedules selected jobs for this week while preserving their original application deadlines. Records and attached documents remain on your Mac, not in this repository.
+`job shortlist` schedules selected jobs for this week while preserving their original application deadlines. For pending (`Wait`) applications, an **expired application deadline** automatically makes `Next` show `ASAP` without altering the stored deadline; unexpired dates follow the usual weekly/exact-date rules, and a manual `Next` always takes precedence. Records and attached documents remain on your Mac, not in this repository.
