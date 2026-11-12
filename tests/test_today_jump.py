@@ -56,7 +56,7 @@ def test_today_anchor_is_viewport_top_and_up_reveals_past_jobs(tmp_path):
             past.append(record_id)
             store.add(ApplicationRecord(
                 id=record_id, company=f"Company {record_id}", job="Analyst",
-                action="Wait", deadline=(today - timedelta(days=days_ago)).isoformat(),
+                action="Apply", deadline=(today - timedelta(days=days_ago)).isoformat(),
             ))
         store.add(ApplicationRecord(
             id="present", company="Present", job="Research",
@@ -100,7 +100,7 @@ def test_today_anchor_falls_back_to_last_active_past_entry(tmp_path):
         for i in range(2):
             store.add(ApplicationRecord(
                 id=f"past-{i}", company=f"Employer {i}", job="Analyst",
-                action="Wait", deadline=(today - timedelta(days=3 - i)).isoformat(),
+                action="Apply", deadline=(today - timedelta(days=3 - i)).isoformat(),
             ))
         app = CareerApp(store)
         async with app.run_test(size=(100, 10)) as pilot:
@@ -108,4 +108,42 @@ def test_today_anchor_falls_back_to_last_active_past_entry(tmp_path):
             widget = app.screen.query_one(ApplicationList)
             assert widget.selected().id == "past-1"
             assert widget.first_visible == 1
+    asyncio.run(scenario())
+
+
+
+def test_expired_wait_appears_in_today_view_not_past(tmp_path):
+    from datetime import date, timedelta
+
+    async def scenario():
+        today = date.today()
+        store = CareerStore(tmp_path / "wait-today")
+        store.add(ApplicationRecord(
+            id="wait", company="HKEX", job="Graduate Programme",
+            action="Wait", deadline=(today - timedelta(days=70)).isoformat(),
+        ))
+        store.add(ApplicationRecord(
+            id="older", company="Other", job="Analyst",
+            action="Check", deadline=(today - timedelta(days=3)).isoformat(),
+        ))
+        store.add(ApplicationRecord(
+            id="future", company="Future", job="Research",
+            action="Apply", deadline=(today + timedelta(days=10)).isoformat(),
+        ))
+        before = store.export_data()
+        app = CareerApp(store)
+        async with app.run_test(size=(100, 14)) as pilot:
+            await pilot.pause()
+            widget = app.screen.query_one(ApplicationList)
+            assert [r.id for r in app.screen.visible_records] == [
+                "older", "wait", "future",
+            ]
+            assert widget.selected().id == "wait"
+            assert widget.first_visible == 1
+            assert "ASAP" in widget.render().plain
+            await pilot.press("t")
+            await pilot.pause()
+            assert widget.selected().id == "wait"
+            assert widget.first_visible == 1
+        assert store.export_data() == before
     asyncio.run(scenario())

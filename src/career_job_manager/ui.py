@@ -444,7 +444,6 @@ class HomeScreen(Screen):
         ("up", "move_up", "Up"),
         ("down", "move_down", "Down"),
         ("t", "today", "Today"),
-        ("w", "wait", "Wait"),
         ("right", "open_selected", "Open"),
         ("a", "add_application", "Add"),
         ("c", "open_company", "Company"),
@@ -463,13 +462,12 @@ class HomeScreen(Screen):
         self.opened_record_id: str | None = None
         self.created_today = date.today()
         self._last_search_query = ""
-        self.wait_only = False
 
     def compose(self) -> ComposeResult:
         yield Static("APPLICATIONS", id="home-title")
         yield ApplicationList(id="applications")
         yield SearchInput(placeholder="Search", id="search")
-        yield Static("t Today   w Wait   a add   → open   c company   / search   d delete   q quit", id="home-help")
+        yield Static("t Today   a add   → open   c company   / search   d delete   q quit", id="home-help")
 
     def on_mount(self) -> None:
         self.query_one("#search", SearchInput).styles.display = "none"
@@ -511,10 +509,6 @@ class HomeScreen(Screen):
             companies = self.store.companies()
             self.visible_records = [r for r in self.visible_records
                                     if (resolve(companies, r.company_id, r.company) or {}).get('id') == self.company_context['id']]
-        if self.wait_only:
-            # The application cutoff does not close the hiring process.
-            # Display ALL pending applications, including historical Next dates.
-            self.visible_records = [r for r in self.visible_records if r.action == "Wait"]
         widget = self.query_one("#applications", ApplicationList)
         if query != self._last_search_query:
             # A narrowed list is a new result set. Reusing the old scroll
@@ -543,38 +537,16 @@ class HomeScreen(Screen):
         widget.refresh()
 
     def action_today(self) -> None:
-        """Return to the full chronological list at today's boundary."""
+        """Return to today's chronological boundary without reordering past."""
         search = self.query_one("#search", SearchInput)
         if search.has_focus:
-            return  # 't' is text when typing a search.
+            return  # 't' is text while typing a search.
         if search.value:
             search.value = ""
             search.styles.display = "none"
-        self.wait_only = False
         self.refresh_list()
         self._jump_today()
         self.query_one("#applications", ApplicationList).focus()
-
-    def action_wait(self) -> None:
-        """Toggle a full view of pending applications without changing Next."""
-        search = self.query_one("#search", SearchInput)
-        if search.has_focus:
-            return  # 'w' is ordinary text while entering a search.
-        self.wait_only = not self.wait_only
-        if search.value:
-            search.value = ""
-            search.styles.display = "none"
-        self.refresh_list()
-        widget = self.query_one("#applications", ApplicationList)
-        if self.wait_only:
-            # Show the whole pending list, including old applications before
-            # today's cursor, rather than silently leaving earlier Wait hidden.
-            widget.selected_index = 0
-            widget.first_visible = 0
-            widget.refresh()
-        else:
-            self._jump_today()
-        widget.focus()
 
     def action_move(self, delta: int) -> None:
         if self.query_one("#search", SearchInput).has_focus:

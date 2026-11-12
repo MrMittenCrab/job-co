@@ -210,7 +210,7 @@ def test_legacy_records_default_description_text_to_empty():
     assert record.description_text == ""
 
 
-def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline():
+def test_wait_expired_deadline_is_auto_asap_without_editing_deadline():
     today = date(2026, 10, 27)
     records = [
         make_record(id="old", company="A", action="Apply", deadline="2026-10-20"),
@@ -219,9 +219,10 @@ def test_wait_expired_deadline_is_ordered_after_today_without_editing_deadline()
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "wait", "old", "next", "future-wait",
+        "old", "wait", "next", "future-wait",
     ]
     assert records[1].deadline == "2026-09-01"
+    assert records[1].next == ""
     records[1].action = "Apply"
     assert [r.id for r in sort_records(records, today=today)] == [
         "wait", "old", "next", "future-wait",

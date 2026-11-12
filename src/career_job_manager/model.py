@@ -305,12 +305,14 @@ def _season_end(today: date) -> date:
 
 
 def default_next(record: ApplicationRecord, today: date) -> str:
-    """Derive a precise Next without ever mutating the original Deadline.
+    """Derive Next without ever mutating the original application Deadline.
 
-    Exact application deadline -> exact date/time, past or future.
-    Vague month/season/range -> the first-week Sunday outside its period;
-    current-week Sunday while inside the period.
-    No deadline -> opening ('when') checkpoint, or this week's Sunday.
+    Wait with an expired confirmed application deadline -> ASAP.
+    Otherwise, exact deadline -> exact date/time; vague deadline ->
+    the first-week Sunday before its period or after it ends, and the
+    current-week Sunday during the period. With no confirmed deadline,
+    use the recorded recruitment opening ('when') checkpoint.
+    Manual Next overrides this function through next_value().
     """
     if record.action == "Archive":
         return ""
@@ -319,15 +321,22 @@ def default_next(record: ApplicationRecord, today: date) -> str:
     raw = record.deadline
     parsed = _parse_deadline_or_none(raw)
     if parsed:
+        # Expired means the closing calendar day has passed. The closing
+        # date is an application cutoff, never a hiring decision date.
+        if record.action == "Wait" and parsed.date() < today:
+            return "ASAP"
         return raw
 
     if raw:
         try:
             start, end = timing.timing_start(raw), timing.timing_end(raw)
         except ValueError:
-            # Non-date legacy text is not a closing date. Keep it intact
-            # but display a specific review date rather than "unclear".
+            # Unrecognized legacy text is NOT proof of an expired cutoff.
             return sunday.isoformat()
+        # A month/season/range expires only after its final calendar day,
+        # not after the earlier first-week review checkpoint.
+        if record.action == "Wait" and end < today:
+            return "ASAP"
         if start <= today <= end:
             return min(sunday, end).isoformat()
         return min(end_of_current_week(start), end).isoformat()
@@ -360,7 +369,7 @@ def next_value(record: ApplicationRecord, today: date) -> str:
 
 
 def effective_queue_date(record: ApplicationRecord, today: date) -> date:
-    """Chronological Next date; overdue Wait is not artificially moved."""
+    """Chronological Next date, with expired automatic Wait at today's ASAP."""
     raw = next_value(record, today)
     parsed = _parse_deadline_or_none(raw)
     return today if raw == "ASAP" else parsed.date() if parsed else date.max
