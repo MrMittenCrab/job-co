@@ -16,7 +16,7 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install -e ".[dev]"
       - name: Fast model and storage tests
-        run: python -m pytest -q -x tests/test_inline_clipboard.py tests/test_wait_action_color.py tests/test_search_viewport.py tests/test_import_cleanup.py tests/test_shortlist.py tests/test_weekly_export.py tests/test_today_jump.py tests/test_next_deadline.py tests/test_next_ui.py tests/test_model.py tests/test_store.py tests/test_presentation.py tests/test_editing.py
+        run: python -m pytest -q -x tests/test_wait_view.py tests/test_inline_clipboard.py tests/test_wait_action_color.py tests/test_search_viewport.py tests/test_import_cleanup.py tests/test_shortlist.py tests/test_weekly_export.py tests/test_today_jump.py tests/test_next_deadline.py tests/test_next_ui.py tests/test_model.py tests/test_store.py tests/test_presentation.py tests/test_editing.py
 
   full:
     # Legacy UI tests still assert the old Company-first/Deadline-first design.
