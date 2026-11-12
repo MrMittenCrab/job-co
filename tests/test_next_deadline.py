@@ -204,7 +204,9 @@ def test_manually_set_next_never_rolls_with_future_vague_deadline():
 def test_vague_period_always_resolves_to_specific_calendar_date(cutoff, today, expected):
     for action in ("Apply", "Wait", "Take", "Check"):
         app = record(action=action, deadline=cutoff)
-        assert next_value(app, today) == ("ASAP" if action == "Wait" and today > date(2026, 11, 30) and cutoff.startswith("2026-") else expected)
+        from career_job_manager.timing import timing_end
+        want = "ASAP" if action == "Wait" and timing_end(cutoff) < today else expected
+        assert next_value(app, today) == want
         assert app.next == ""
         assert app.deadline == cutoff
 
