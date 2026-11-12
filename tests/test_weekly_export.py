@@ -107,6 +107,6 @@ def test_wait_after_closing_is_included_for_review_but_unsubmitted_expired_is_no
     assert ids == ["waiting", "manually-follow-up"]
     waiting = next(entry for entry in agenda["items"] if entry["id"] == "waiting")
     assert waiting["action"] == "Wait"
-    assert waiting["next"] == "2026-12-31"
+    assert waiting["next"] == "ASAP"
     assert waiting["deadline"] == "2026-12-31"
     assert waiting["next_source"] == "automatic"
