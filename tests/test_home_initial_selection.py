@@ -85,7 +85,7 @@ def test_creation_clock_initial_viewport_and_detail_return(tmp_path, clock):
     asyncio.run(scenario())
 
 
-def test_expired_wait_is_above_today_and_not_initially_selected(tmp_path, clock):
+def test_expired_wait_is_on_today_boundary_not_in_historical_dates(tmp_path, clock):
     async def scenario():
         store = CareerStore(tmp_path)
         store.import_jobs({'jobs': [
@@ -100,15 +100,16 @@ def test_expired_wait_is_above_today_and_not_initially_selected(tmp_path, clock)
         async with app.run_test() as pilot:
             await pilot.pause()
             assert [r.id for r in app.screen.visible_records] == [
-                'waiting', 'old', 'future',
+                'old', 'waiting', 'future',
             ]
-            assert app.screen.selected_record().id == 'future'
+            assert app.screen.selected_record().id == 'waiting'
             assert store.get('waiting').deadline == '2026-09-15'
+            assert store.get('waiting').next == ''
             clock.current = date(2026, 10, 25)
             await app.push_screen(HomeScreen(store))
             await pilot.pause()
             assert [r.id for r in app.screen.visible_records] == [
-                'waiting', 'old', 'future',
+                'old', 'future', 'waiting',
             ]
-            assert app.screen.selected_record().id == 'future'
+            assert app.screen.selected_record().id == 'waiting'
     asyncio.run(scenario())
