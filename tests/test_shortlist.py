@@ -252,7 +252,7 @@ def test_shortlist_preserves_intentional_asap_and_existing_actions(tmp_path):
     assert store.shortlist(manifest("scheduled", "check", "wait", "apply"),
                            today=date(2026, 11, 9)) == (2, 0, 2)
     assert store.get("scheduled").next == "2026-11-15"
-    assert store.get("check").next == "ASAP"
+    assert store.get("check").next == "2026-11-15"
     for ident in ("wait", "apply"):
         assert store.get(ident).to_dict() == before[ident]
 
@@ -307,15 +307,15 @@ def test_already_apply_records_are_scheduled_for_this_week(tmp_path):
                            today=today) == (0, 0, 4)
 
 
-def test_existing_apply_asap_is_not_replaced_by_shortlist(tmp_path):
+def test_existing_apply_asap_is_replaced_by_shortlist_weekly_next(tmp_path):
     from datetime import date
     store = CareerStore(tmp_path / "keep-asap")
     store.add(ApplicationRecord(
         id="asap", company="Firm", job="Research",
         action="Apply", deadline="2026-11-30", next="ASAP",
     ))
-    assert store.shortlist(manifest("asap"), today=date(2026, 11, 9)) == (0, 0, 1)
-    assert store.get("asap").next == "ASAP"
+    assert store.shortlist(manifest("asap"), today=date(2026, 11, 9)) == (0, 1, 0)
+    assert store.get("asap").next == "2026-11-15"
 
 
 def test_already_apply_earlier_exact_deadline_is_respected(tmp_path):
