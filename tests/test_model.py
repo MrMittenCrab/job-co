@@ -258,7 +258,7 @@ def test_fortnight_deadlines_precede_existing_action_groups():
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
         "overdue-check", "urgent-wait", "urgent-take", "urgent-check",
-        "urgent-apply", "no-deadline-check", "last-day", "far-apply",
+        "urgent-apply", "far-apply", "no-deadline-check", "last-day",
         "later-check", "archived",
     ]
 
