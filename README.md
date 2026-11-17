@@ -17,7 +17,7 @@ bash scripts/install.sh
 job
 ```
 
-Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **a** to add, and **q** to quit. In an editing field, **Ctrl+A** selects text and **Ctrl+Y** copies the field to the system clipboard; **⌘C** also works if your terminal forwards it. Run `company` for the companion company tracker.
+Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **a** to add, and **q** to quit. In an editing field, **Ctrl+A** selects text and **Ctrl+C** or **Ctrl+Y** copies the full field to the system clipboard, including when a field is automatically highlighted. **⌘C** works only if your terminal forwards the keystroke to job&co; macOS Terminal and other terminals often reserve it for copying native terminal text selections. The app's automatic highlight is not a native terminal text selection. Run `company` for the companion company tracker.
 
 ## Weekly shortlist
 
