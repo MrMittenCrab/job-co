@@ -43,7 +43,7 @@ def test_mac_clipboard_reports_pbcopy_failure(monkeypatch):
         copy_native_clipboard("value")
 
 
-@pytest.mark.parametrize("key", ["ctrl+y", "super+c", "cmd+c"])
+@pytest.mark.parametrize("key", ["ctrl+c", "ctrl+y", "super+c", "cmd+c"])
 def test_copy_current_editing_field_with_keyboard(tmp_path, monkeypatch, key):
     from career_job_manager import ui
     copied = []
@@ -105,7 +105,8 @@ def test_ctrl_a_then_ctrl_y_copies_multiline_text(tmp_path, monkeypatch):
     asyncio.run(scenario())
 
 
-def test_copy_without_selection_uses_whole_focused_field(tmp_path, monkeypatch):
+@pytest.mark.parametrize("key", ["ctrl+c", "ctrl+y"])
+def test_copy_without_selection_uses_whole_focused_field(tmp_path, monkeypatch, key):
     from career_job_manager import ui
     copied = []
     monkeypatch.setattr(ui, "copy_native_clipboard",
@@ -127,7 +128,7 @@ def test_copy_without_selection_uses_whole_focused_field(tmp_path, monkeypatch):
             await pilot.press("right")
             assert row.editing
             assert not row.editor.all_selected
-            await pilot.press("ctrl+y")
+            await pilot.press(key)
             assert copied == ["contact@example.org"]
             assert row.editor.value == "contact@example.org"
     asyncio.run(scenario())
