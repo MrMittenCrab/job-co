@@ -31,18 +31,23 @@ def manifest(*ids):
     return {"schema_version": 1, "shortlist": list(ids)}
 
 
-def test_promote_only_check_preserve_other_actions_and_fields(tmp_path):
+def test_shortlist_promotes_check_and_schedules_apply_without_changing_other_actions(tmp_path):
+    from datetime import date
+
     store = setup_store(tmp_path)
     before = {job["id"]: job for job in store.export_data()["jobs"]}
-    count = store.shortlist(manifest("external-check", "apply", "wait", "take", "archive"))
-    assert count == (1, 0, 4)
+    selected = manifest("external-check", "apply", "wait", "take", "archive")
+    count = store.shortlist(selected, today=date(2026, 11, 9))
+    assert count == (1, 1, 3)
     after = {job["id"]: job for job in store.export_data()["jobs"]}
     for id, previous in before.items():
         if id == "check":
-            assert after[id] == {**previous, "action": "Apply"}
+            assert after[id] == {**previous, "action": "Apply", "next": "2026-11-13"}
+        elif id == "apply":
+            assert after[id] == {**previous, "next": "2026-11-13"}
         else:
             assert after[id] == previous
-    assert store.shortlist(manifest("check", "apply", "wait", "take", "archive")) == (0, 0, 5)
+    assert store.shortlist(selected, today=date(2026, 11, 9)) == (0, 0, 5)
 
 
 def test_unknown_id_aborts_everything_without_partial_application(tmp_path):
