@@ -15,7 +15,7 @@ from textual.widgets import Input, Static
 from .clipboard import copy_native_clipboard
 from .editing import InlineBuffer, editor_for_field, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records, today_position, reschedule_overdue_wait_next
+from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records, today_position, next_value, reschedule_overdue_wait_next
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -667,7 +667,7 @@ class ApplicationScreen(Screen[bool]):
             "Company": record.company if record else "",
             "Job": record.job if record else "",
             "Deadline": record.deadline if record else "",
-            "Next": record.next if record and record.next else default_next(initial, date.today()),
+            "Next": next_value(record, date.today()) if record else default_next(initial, date.today()),
             "Action": record.action if record else "Apply",
             "Target": record.target if record else "",
             "Brief": record.brief if record else "",
