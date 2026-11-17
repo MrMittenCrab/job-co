@@ -114,6 +114,7 @@ def test_today_anchor_falls_back_to_last_active_past_entry(tmp_path):
 
 def test_expired_wait_appears_in_today_view_not_past(tmp_path):
     from datetime import date, timedelta
+    from career_job_manager.model import end_of_current_week
 
     async def scenario():
         today = date.today()
@@ -140,7 +141,7 @@ def test_expired_wait_appears_in_today_view_not_past(tmp_path):
             ]
             assert widget.selected().id == "wait"
             assert widget.first_visible == 1
-            assert "ASAP" in widget.render().plain
+            assert end_of_current_week(today).strftime("%-d %b") in widget.render().plain
             await pilot.press("t")
             await pilot.pause()
             assert widget.selected().id == "wait"
