@@ -35,7 +35,7 @@ def test_this_week_end_includes_asap_overdue_manual_and_sunday():
     assert result["week_ending"] == "2026-11-15"
     assert result["format"] == "jobco-weekly-agenda"
     ids = [r["id"] for r in result["items"]]
-    assert ids == ["overdue", "asap", "close", "wait", "vague", "sun"]
+    assert ids == ["overdue", "asap", "close", "mon", "wait", "vague", "sun"]
     assert "expired" not in ids
     assert "archived" not in ids
 
