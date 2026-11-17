@@ -270,8 +270,10 @@ def test_fortnight_window_is_inclusive_and_requires_confirmed_deadline():
     assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-23"), today)
     assert deadline_due_within_two_weeks(make_record(action="Take", deadline="2026-11-22"), today)
     assert deadline_due_within_two_weeks(make_record(action="Wait", deadline="2026-11-09"), today)
-    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
-    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-12-01"), today)
+    # An unexpired Apply cutoff farther out now has a current-week Next.
+    assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
+    assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-12-01"), today)
+    assert not deadline_due_within_two_weeks(make_record(action="Check", deadline="2026-11-24"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-08"), today)
     assert deadline_due_within_two_weeks(make_record(action="Check", when="2026-11"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Archive", deadline="2026-11-11"), today)
