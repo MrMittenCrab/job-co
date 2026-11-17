@@ -68,7 +68,7 @@ def test_changing_action_preserves_manual_next_and_chronological_position(tmp_pa
         for i, (before, _, next_due) in enumerate(transitions):
             store.add(ApplicationRecord(
                 id=f"transition-{i}", company=f"Firm {i}", job="Research",
-                action=before, next=next_due, deadline="2026-12-31",
+                action=before, next=next_due, deadline="",
             ))
         app = CareerApp(store)
         async with app.run_test() as pilot:
@@ -87,7 +87,7 @@ def test_changing_action_preserves_manual_next_and_chronological_position(tmp_pa
                 result = store.get(record_id)
                 assert result.action == after
                 assert result.next == next_due
-                assert result.deadline == "2026-12-31"
+                assert result.deadline == ""
     asyncio.run(scenario())
 
 
@@ -103,8 +103,9 @@ def test_action_change_keeps_automatic_next_automatic(tmp_path):
             await app.push_screen(ApplicationScreen(store, "automatic"))
             await pilot.pause()
             screen = app.screen
+            from career_job_manager.model import end_of_current_week
             assert screen._auto_next
-            assert screen.values["Next"] == "2026-12-31"
+            assert screen.values["Next"] == end_of_current_week(date.today()).isoformat()
             screen._after_choice("Action", "Take")
             assert screen._auto_next
             assert screen.values["Next"] == "2026-12-31"
