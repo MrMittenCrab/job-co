@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
-from .model import ApplicationRecord, sort_records, _parse_deadline_or_none, end_of_current_week, reschedule_overdue_wait_next
+from .model import ApplicationRecord, sort_records, _parse_deadline_or_none, end_of_current_week, reschedule_overdue_wait_next, reschedule_unexpired_apply_next
 from .importing import parse_import
 from .naming import application_stem, readable_folder_name
 from .timing import timing_precision, timing_start, timing_end
@@ -40,22 +40,24 @@ class CareerStore:
             if company_changed:
                 payload['companies'] = migrated
 
-            # Correct stale Wait Next values on every launch. A prior
-            # version-9 migration may have completed before these records
-            # became overdue, so schema version alone is not sufficient.
-            # Do not touch application Deadline, ASAP, or non-Wait actions.
+            # Correct stale Wait follow-ups and active Apply checkpoints
+            # at startup, regardless of schema version. Keep original
+            # application deadlines and explicitly urgent ASAP entries.
             needs_upgrade = payload.get('version', 0) < 9
             today = date.today()
             rollover_changed = False
             for row in payload.get('jobs', payload.get('applications', [])):
-                if not isinstance(row, dict) or row.get('action') != 'Wait':
+                if not isinstance(row, dict) or row.get('action') not in {'Wait', 'Apply'}:
                     continue
                 raw_next = row.get('next')
                 if not isinstance(raw_next, str):
                     continue
-                candidate = ApplicationRecord(id="", company="", job="",
-                                              action="Wait", next=raw_next)
-                if reschedule_overdue_wait_next(candidate, today):
+                candidate = ApplicationRecord(
+                    id="", company="", job="", action=row['action'],
+                    next=raw_next, deadline=row.get('deadline', ''),
+                )
+                if (reschedule_overdue_wait_next(candidate, today)
+                        or reschedule_unexpired_apply_next(candidate, today)):
                     row['next'] = candidate.next
                     rollover_changed = True
             if needs_upgrade:
@@ -340,8 +342,11 @@ class CareerStore:
         )
         updated.validate(preserve_action=_preserve_existing_actions,
                          preserve_legacy_deadline=preserve_legacy_deadline)
-        if not _preserve_existing_actions and old.action != "Wait" and updated.action == "Wait":
-            reschedule_overdue_wait_next(updated, date.today())
+        if not _preserve_existing_actions:
+            if old.action != "Wait" and updated.action == "Wait":
+                reschedule_overdue_wait_next(updated, date.today())
+            elif updated.action == "Apply":
+                reschedule_unexpired_apply_next(updated, date.today())
 
         old_stem = application_stem(old.company, old.job)
         new_stem = application_stem(updated.company, updated.job)

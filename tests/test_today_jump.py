@@ -137,14 +137,14 @@ def test_expired_wait_appears_in_today_view_not_past(tmp_path):
             await pilot.pause()
             widget = app.screen.query_one(ApplicationList)
             assert [r.id for r in app.screen.visible_records] == [
-                "older", "wait", "future",
+                "older", "future", "wait",
             ]
-            assert widget.selected().id == "wait"
+            assert widget.selected().id == "future"
             assert widget.first_visible == 1
             assert end_of_current_week(today).strftime("%-d %b") in widget.render().plain
             await pilot.press("t")
             await pilot.pause()
-            assert widget.selected().id == "wait"
+            assert widget.selected().id == "future"
             assert widget.first_visible == 1
         assert store.export_data() == before
     asyncio.run(scenario())

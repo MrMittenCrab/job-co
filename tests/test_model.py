@@ -258,7 +258,7 @@ def test_fortnight_deadlines_precede_existing_action_groups():
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
         "overdue-check", "urgent-wait", "urgent-take", "urgent-check",
-        "urgent-apply", "no-deadline-check", "last-day", "far-apply",
+        "urgent-apply", "far-apply", "no-deadline-check", "last-day",
         "later-check", "archived",
     ]
 
@@ -270,8 +270,10 @@ def test_fortnight_window_is_inclusive_and_requires_confirmed_deadline():
     assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-23"), today)
     assert deadline_due_within_two_weeks(make_record(action="Take", deadline="2026-11-22"), today)
     assert deadline_due_within_two_weeks(make_record(action="Wait", deadline="2026-11-09"), today)
-    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
-    assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-12-01"), today)
+    # An unexpired Apply cutoff farther out now has a current-week Next.
+    assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-24"), today)
+    assert deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-12-01"), today)
+    assert not deadline_due_within_two_weeks(make_record(action="Check", deadline="2026-11-24"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Apply", deadline="2026-11-08"), today)
     assert deadline_due_within_two_weeks(make_record(action="Check", when="2026-11"), today)
     assert not deadline_due_within_two_weeks(make_record(action="Archive", deadline="2026-11-11"), today)
@@ -291,8 +293,8 @@ def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_e
         make_record(id="undated-wait", company="Wait", action="Wait", when="2026-11-05"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "approx", "newer-apply", "undated-wait", "newer-check",
-        "older", "urgent", "far-deadline", "future-start",
+        "approx", "far-deadline", "newer-apply", "undated-wait",
+        "newer-check", "older", "urgent", "future-start",
         "archived-undated",
     ]
 

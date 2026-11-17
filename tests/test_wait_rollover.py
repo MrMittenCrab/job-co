@@ -133,7 +133,7 @@ def test_version9_overdue_wait_self_heals_on_next_startup(tmp_path, monkeypatch)
     reopened = CareerStore(root)
     assert all(reopened.get(key).next == "2026-11-22"
                for key in ("gaw", "hkex", "hsbc", "jefferies"))
-    assert reopened.get("pimco").next == "2026-11-14"
+    assert reopened.get("pimco").next == "2026-11-22"
     assert reopened.get("bernstein").next == "ASAP"
     assert reopened.get("fullgoal").next == "2026-11-22"
     assert all(reopened.get(key).deadline == "2026-12-31"
@@ -175,5 +175,84 @@ def test_detail_screen_displays_effective_next_for_existing_wait(tmp_path, monke
             screen.action_save()
             await pilot.pause()
             assert store.get("hkex").next == "2026-11-22"
+
+    asyncio.run(scenario())
+
+
+
+def test_apply_existing_stale_date_changes_on_startup_even_with_version9(tmp_path, monkeypatch):
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    root = tmp_path / "career"
+    store = CareerStore(root)
+    for key, deadline, next_due in (
+        ("flow", "2026-12-31", "2026-11-15"),
+        ("point72", "2027-01-15", "2027-01-15"),
+        ("capula", "2026-11-20 15:00", "2026-11-15"),
+        ("pimco", "2026-11-14", "2026-11-14"),
+        ("unknown", "", "2026-11-15"),
+        ("priority", "2026-12-31", "ASAP"),
+    ):
+        store.add(make_record(key, action="Apply", deadline=deadline, next=next_due))
+    assert store._document()["version"] == 9
+
+    # Before startup repair, the in-memory queue resolves eligible Apply dates.
+    today = date(2026, 11, 17)
+    assert next_value(store.get("flow"), today) == "2026-11-22"
+    assert next_value(store.get("point72"), today) == "2026-11-22"
+    assert next_value(store.get("capula"), today) == "2026-11-20 15:00"
+
+    reloaded = CareerStore(root)
+    assert reloaded.get("flow").next == "2026-11-22"
+    assert reloaded.get("point72").next == "2026-11-22"
+    assert reloaded.get("capula").next == "2026-11-20 15:00"
+    assert reloaded.get("pimco").next == "2026-11-14"
+    assert reloaded.get("unknown").next == "2026-11-15"
+    assert reloaded.get("priority").next == "ASAP"
+    assert reloaded.get("flow").deadline == "2026-12-31"
+
+    previous = reloaded.metadata_path.read_bytes()
+    assert CareerStore(root).metadata_path.read_bytes() == previous
+    FrozenDate.current = date(2026, 11, 24)
+    assert CareerStore(root).get("flow").next == "2026-11-29"
+
+
+def test_apply_status_transition_schedules_current_week(tmp_path, monkeypatch):
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    store = CareerStore(tmp_path / "career")
+    store.add(make_record("capula", action="Check", next="2026-12-31"))
+    changed = store.update("capula", {"action": "Apply"})
+    assert changed.next == "2026-11-22"
+    assert changed.deadline == "2026-12-31"
+
+
+def test_apply_detail_previews_week_end_for_unexpired_deadline(tmp_path, monkeypatch):
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    monkeypatch.setattr(ui_module, "date", FrozenDate)
+
+    async def scenario():
+        store = CareerStore(tmp_path / "career")
+        store.add(make_record("flow", action="Apply", next="2026-11-15"))
+        store.add(make_record("point72", action="Check", next="2026-12-31"))
+        app = CareerApp(store)
+        async with app.run_test() as pilot:
+            await app.push_screen(ApplicationScreen(store, "flow"))
+            await pilot.pause()
+            screen = app.screen
+            assert screen.values["Next"] == "2026-11-22"
+            screen.action_save()
+            await pilot.pause()
+            assert store.get("flow").next == "2026-11-22"
+
+            await app.push_screen(ApplicationScreen(store, "point72"))
+            await pilot.pause()
+            screen = app.screen
+            screen._after_choice("Action", "Apply")
+            assert screen.values["Next"] == "2026-11-22"
+            screen.action_save()
+            await pilot.pause()
+            assert store.get("point72").next == "2026-11-22"
 
     asyncio.run(scenario())
