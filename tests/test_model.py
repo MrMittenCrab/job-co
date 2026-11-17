@@ -123,8 +123,9 @@ def test_auto_next_promotes_active_recruitment_before_expired_cutoffs(action):
         make_record(id="early", action=action, deadline="2026-09-01"),
     ]
     ids = [r.id for r in sort_records(records, today=date(2026, 11, 9))]
-    assert (ids == ["fuzzy", "early", "late"] if action != "Archive"
-            else ids == ["early", "fuzzy", "late"])
+    assert (ids == ["early", "late", "fuzzy"] if action == "Apply"
+            else ["early", "fuzzy", "late"] if action == "Archive"
+            else ["fuzzy", "early", "late"])
 
 
 def test_filter_records_searches_company_job_action_contact_and_keeps_order():
@@ -293,8 +294,8 @@ def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_e
         make_record(id="undated-wait", company="Wait", action="Wait", when="2026-11-05"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "approx", "far-deadline", "newer-apply", "undated-wait",
-        "newer-check", "older", "urgent", "future-start",
+        "approx", "far-deadline", "newer-apply", "newer-check",
+        "older", "undated-wait", "urgent", "future-start",
         "archived-undated",
     ]
 
