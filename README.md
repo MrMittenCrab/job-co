@@ -27,4 +27,4 @@ job export this-week
 job shortlist
 ```
 
-`job shortlist` schedules selected jobs for this week while preserving their original application deadlines. For pending (`Wait`) applications, an **expired application deadline** automatically makes `Next` show `ASAP` without altering the stored deadline; unexpired dates follow the usual weekly/exact-date rules, and a manual `Next` always takes precedence. Records and attached documents remain on your Mac, not in this repository.
+`job shortlist` schedules selected jobs for this week while preserving their original application deadlines. For pending (`Wait`) applications, an **expired application deadline** automatically makes `Next` show this week's Sunday without altering the stored deadline; changing an Action to `Wait` also moves an overdue dated `Next` to Sunday. Existing overdue dated `Wait` follow-ups are corrected once on upgrade. Same-day and future dates, plus explicit `ASAP`, are preserved; explicit dates do not automatically roll every week. Records and attached documents remain on your Mac, not in this repository.

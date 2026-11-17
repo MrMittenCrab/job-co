@@ -307,7 +307,7 @@ def _season_end(today: date) -> date:
 def default_next(record: ApplicationRecord, today: date) -> str:
     """Derive Next without ever mutating the original application Deadline.
 
-    Wait with an expired confirmed application deadline -> ASAP.
+    Wait with an expired confirmed application deadline -> current-week Sunday.
     Otherwise, exact deadline -> exact date/time; vague deadline ->
     the first-week Sunday before its period or after it ends, and the
     current-week Sunday during the period. With no confirmed deadline,
@@ -324,7 +324,7 @@ def default_next(record: ApplicationRecord, today: date) -> str:
         # Expired means the closing calendar day has passed. The closing
         # date is an application cutoff, never a hiring decision date.
         if record.action == "Wait" and parsed.date() < today:
-            return "ASAP"
+            return sunday.isoformat()
         return raw
 
     if raw:
@@ -336,7 +336,7 @@ def default_next(record: ApplicationRecord, today: date) -> str:
         # A month/season/range expires only after its final calendar day,
         # not after the earlier first-week review checkpoint.
         if record.action == "Wait" and end < today:
-            return "ASAP"
+            return sunday.isoformat()
         if start <= today <= end:
             return min(sunday, end).isoformat()
         return min(end_of_current_week(start), end).isoformat()
@@ -350,6 +350,8 @@ def default_next(record: ApplicationRecord, today: date) -> str:
         end = timing.timing_end(when)
         precision = timing.timing_precision(when)
     except ValueError:
+        return sunday.isoformat()
+    if record.action == "Wait" and end < today:
         return sunday.isoformat()
     if precision == 3:
         return (start if start > today else sunday).isoformat()
@@ -368,8 +370,19 @@ def next_value(record: ApplicationRecord, today: date) -> str:
     return default_next(record, today)
 
 
+def reschedule_overdue_wait_next(record: ApplicationRecord, today: date) -> bool:
+    """Roll an overdue dated Wait follow-up once on status change or upgrade."""
+    if record.action != "Wait" or not record.next or record.next.upper() == "ASAP":
+        return False
+    due = _parse_deadline_or_none(record.next)
+    if due is None or due.date() >= today:
+        return False
+    record.next = end_of_current_week(today).isoformat()
+    return True
+
+
 def effective_queue_date(record: ApplicationRecord, today: date) -> date:
-    """Chronological Next date, with expired automatic Wait at today's ASAP."""
+    """Chronological Next date; automatic overdue Wait reviews fall on Sunday."""
     raw = next_value(record, today)
     parsed = _parse_deadline_or_none(raw)
     return today if raw == "ASAP" else parsed.date() if parsed else date.max
