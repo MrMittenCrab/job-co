@@ -182,10 +182,10 @@ def test_future_and_active_vague_deadline_uses_correct_week_end(period, today, e
     ("2027-10..2027-12", date(2026, 11, 9), "2027-10-03"),
     ("2027-03-01", date(2026, 11, 9), "2027-03-01"),
 ])
-def test_future_vague_recruitment_opening_uses_first_sunday_but_exact_is_unchanged(
+def test_check_future_vague_recruitment_opening_uses_first_sunday_but_exact_is_unchanged(
     opening, today, expected,
 ):
-    app = record(deadline="", when=opening)
+    app = record(action="Check", deadline="", when=opening)
     assert default_next(app, today) == expected
     assert app.next == ""
 
