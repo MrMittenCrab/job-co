@@ -77,16 +77,20 @@ def test_changing_action_preserves_manual_next_and_chronological_position(tmp_pa
                 await app.push_screen(ApplicationScreen(store, record_id))
                 await pilot.pause()
                 screen = app.screen
-                assert screen.values["Next"] == next_due
+                from career_job_manager.model import end_of_current_week
+                sunday = end_of_current_week(date.today()).isoformat()
+                before_due = sunday if before == "Apply" else next_due
+                after_due = sunday if before == "Apply" or after == "Apply" else next_due
+                assert screen.values["Next"] == before_due
                 assert not screen._auto_next
                 screen._after_choice("Action", after)
-                assert screen.values["Next"] == next_due
+                assert screen.values["Next"] == after_due
                 assert not screen._auto_next
                 screen.action_save()
                 await pilot.pause()
                 result = store.get(record_id)
                 assert result.action == after
-                assert result.next == next_due
+                assert result.next == after_due
                 assert result.deadline == ""
     asyncio.run(scenario())
 
