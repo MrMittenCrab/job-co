@@ -312,7 +312,8 @@ def default_next(record: ApplicationRecord, today: date) -> str:
     the first-week Sunday before its period or after it ends, and the
     current-week Sunday during the period. With no confirmed deadline,
     use the recorded recruitment opening ('when') checkpoint.
-    Manual Next overrides this function through next_value().
+    A manually dated overdue Wait Next also rolls to Sunday via next_value().
+    Explicit ASAP is never rolled over.
     """
     if record.action == "Archive":
         return ""
@@ -361,17 +362,23 @@ def default_next(record: ApplicationRecord, today: date) -> str:
 
 
 def next_value(record: ApplicationRecord, today: date) -> str:
-    """Return an exact date/time or ASAP, even for malformed legacy data."""
+    """Return the effective current Next, including overdue Wait follow-ups.
+
+    Never write metadata as a side effect of drawing or sorting a row.
+    """
     if record.next:
         if record.next.upper() == "ASAP":
             return "ASAP"
-        if _parse_deadline_or_none(record.next):
+        due = _parse_deadline_or_none(record.next)
+        if due:
+            if record.action == "Wait" and due.date() < today:
+                return end_of_current_week(today).isoformat()
             return record.next
     return default_next(record, today)
 
 
 def reschedule_overdue_wait_next(record: ApplicationRecord, today: date) -> bool:
-    """Roll an overdue dated Wait follow-up once on status change or upgrade."""
+    """Roll an overdue dated Wait follow-up when updating stored metadata."""
     if record.action != "Wait" or not record.next or record.next.upper() == "ASAP":
         return False
     due = _parse_deadline_or_none(record.next)
