@@ -304,9 +304,44 @@ def _season_end(today: date) -> date:
     return timing.timing_end(timing.season_for_date(today))
 
 
+def apply_weekly_next(record: ApplicationRecord, today: date) -> str | None:
+    """Schedule an open Apply deadline for the current week, never past cutoff.
+
+    An exact cutoff earlier than Sunday keeps its date and optional clock time.
+    Missing, invalid, or already-expired deadlines do not trigger this rule.
+    """
+    if record.action != "Apply" or not record.deadline:
+        return None
+    sunday = end_of_current_week(today)
+    exact = _parse_deadline_or_none(record.deadline)
+    if exact:
+        if exact.date() < today:
+            return None
+        return record.deadline if exact.date() <= sunday else sunday.isoformat()
+    try:
+        end = timing.timing_end(record.deadline)
+    except (ValueError, TypeError):
+        return None
+    if end < today:
+        return None
+    return min(sunday, end).isoformat()
+
+
+def reschedule_unexpired_apply_next(record: ApplicationRecord, today: date) -> bool:
+    """Persist a weekly Apply checkpoint only when Next is already dated."""
+    if not record.next or record.next.upper() == "ASAP":
+        return False
+    due = apply_weekly_next(record, today)
+    if due is None or due == record.next:
+        return False
+    record.next = due
+    return True
+
+
 def default_next(record: ApplicationRecord, today: date) -> str:
     """Derive Next without ever mutating the original application Deadline.
 
+    Apply with an unexpired deadline -> this Sunday (or earlier cutoff).
     Wait with an expired confirmed application deadline -> current-week Sunday.
     Otherwise, exact deadline -> exact date/time; vague deadline ->
     the first-week Sunday before its period or after it ends, and the
@@ -317,6 +352,10 @@ def default_next(record: ApplicationRecord, today: date) -> str:
     """
     if record.action == "Archive":
         return ""
+
+    apply_due = apply_weekly_next(record, today)
+    if apply_due is not None:
+        return apply_due
 
     sunday = end_of_current_week(today)
     raw = record.deadline
@@ -366,9 +405,12 @@ def next_value(record: ApplicationRecord, today: date) -> str:
 
     Never write metadata as a side effect of drawing or sorting a row.
     """
+    if record.next and record.next.upper() == "ASAP":
+        return "ASAP"
+    apply_due = apply_weekly_next(record, today)
+    if apply_due is not None:
+        return apply_due
     if record.next:
-        if record.next.upper() == "ASAP":
-            return "ASAP"
         due = _parse_deadline_or_none(record.next)
         if due:
             if record.action == "Wait" and due.date() < today:
