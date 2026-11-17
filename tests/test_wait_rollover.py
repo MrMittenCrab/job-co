@@ -76,7 +76,7 @@ def test_one_time_migration_corrects_four_existing_wait_entries(tmp_path, monkey
     assert result["version"] == 9
     assert result["custom"] == {"preserve": True}
     FrozenDate.current = date(2026, 11, 24)
-    assert CareerStore(root).get("gaw").next == "2026-11-22"
+    assert CareerStore(root).get("gaw").next == "2026-11-29"
 
 
 def test_auto_wait_with_expired_cutoff_reviews_this_week_not_asap():
@@ -106,5 +106,74 @@ def test_ui_previews_rollover_when_wait_selected(tmp_path, monkeypatch):
             screen.action_save()
             await pilot.pause()
             assert store.get("jefferies").next == "2026-11-22"
+
+    asyncio.run(scenario())
+
+
+def test_version9_overdue_wait_self_heals_on_next_startup(tmp_path, monkeypatch):
+    """A prior schema upgrade must not permanently strand dated Wait entries."""
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    root = tmp_path / "career"
+    store = CareerStore(root)
+    for key in ("gaw", "hkex", "hsbc", "jefferies"):
+        store.add(make_record(key, action="Wait", next="2026-11-15"))
+    store.add(make_record("pimco", action="Apply", next="2026-11-14"))
+    store.add(make_record("bernstein", action="Wait", next="ASAP"))
+    store.add(make_record("fullgoal", action="Wait", next="2026-11-22"))
+    assert store._document()["version"] == 9
+
+    # Even before a restart, the displayed queue uses the effective date.
+    rows = store.list()
+    wait_rows = [r for r in rows if r.id in ("gaw", "hkex", "hsbc", "jefferies")]
+    assert all(next_value(r, date(2026, 11, 17)) == "2026-11-22" for r in wait_rows)
+    # Rendering uses the model's effective Next when local date is current.
+
+    # Opening the store corrects persisted data regardless of schema version.
+    reopened = CareerStore(root)
+    assert all(reopened.get(key).next == "2026-11-22"
+               for key in ("gaw", "hkex", "hsbc", "jefferies"))
+    assert reopened.get("pimco").next == "2026-11-14"
+    assert reopened.get("bernstein").next == "ASAP"
+    assert reopened.get("fullgoal").next == "2026-11-22"
+    assert all(reopened.get(key).deadline == "2026-12-31"
+               for key in ("gaw", "hkex", "hsbc", "jefferies"))
+    before = reopened.metadata_path.read_bytes()
+    assert CareerStore(root).metadata_path.read_bytes() == before
+
+
+def test_model_never_leaves_an_explicit_wait_next_in_past():
+    from career_job_manager.model import sort_records
+    today = date(2026, 11, 17)
+    stale = make_record("gaw", action="Wait", next="2026-11-15")
+    tomorrow = make_record("future", action="Wait", next="2026-11-18")
+    asap = make_record("asap", action="Wait", next="ASAP")
+    assert next_value(stale, today) == "2026-11-22"
+    assert stale.next == "2026-11-15"  # Reads cannot mutate persisted metadata.
+    assert [r.id for r in sort_records([stale, tomorrow, asap], today=today)] == [
+        "asap", "future", "gaw",
+    ]
+    assert next_value(tomorrow, today) == "2026-11-18"
+    assert next_value(asap, today) == "ASAP"
+
+
+def test_detail_screen_displays_effective_next_for_existing_wait(tmp_path, monkeypatch):
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    monkeypatch.setattr(ui_module, "date", FrozenDate)
+
+    async def scenario():
+        store = CareerStore(tmp_path / "career")
+        store.add(make_record("hkex", action="Wait", next="2026-11-15"))
+        app = CareerApp(store)
+        async with app.run_test() as pilot:
+            await app.push_screen(ApplicationScreen(store, "hkex"))
+            await pilot.pause()
+            screen = app.screen
+            assert screen.values["Next"] == "2026-11-22"
+            assert not screen._auto_next
+            screen.action_save()
+            await pilot.pause()
+            assert store.get("hkex").next == "2026-11-22"
 
     asyncio.run(scenario())

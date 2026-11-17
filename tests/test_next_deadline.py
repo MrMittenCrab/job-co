@@ -270,12 +270,14 @@ def test_wait_without_confirmed_deadline_does_not_infer_expiration_from_opening(
     assert default_next(record(action="Wait", deadline="", when="2026-fall"), today) == "2026-11-15"
 
 
-def test_manual_next_overrides_expired_wait_and_other_actions_never_auto_asap():
+def test_overdue_manual_wait_next_rolls_but_asap_and_future_are_preserved():
     today = date(2026, 11, 12)
     for manual in ("2026-11-19", "ASAP", "2026-10-01"):
         wait = record(action="Wait", deadline="2026-10-01", next=manual)
         assert default_next(wait, today) == "2026-11-15"
-        assert next_value(wait, today) == manual
+        assert next_value(wait, today) == (
+            "2026-11-15" if manual == "2026-10-01" else manual
+        )
         assert wait.deadline == "2026-10-01"
     for action in ("Apply", "Take", "Go", "Email", "Respond", "Check"):
         other = record(action=action, deadline="2026-10-01")
