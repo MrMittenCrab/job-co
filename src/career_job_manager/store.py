@@ -40,19 +40,27 @@ class CareerStore:
             if company_changed:
                 payload['companies'] = migrated
 
-            # One-time local upgrade; preserve application deadlines and ASAP.
+            # Correct stale Wait Next values on every launch. A prior
+            # version-9 migration may have completed before these records
+            # became overdue, so schema version alone is not sufficient.
+            # Do not touch application Deadline, ASAP, or non-Wait actions.
             needs_upgrade = payload.get('version', 0) < 9
+            today = date.today()
+            rollover_changed = False
+            for row in payload.get('jobs', payload.get('applications', [])):
+                if not isinstance(row, dict) or row.get('action') != 'Wait':
+                    continue
+                raw_next = row.get('next')
+                if not isinstance(raw_next, str):
+                    continue
+                candidate = ApplicationRecord(id="", company="", job="",
+                                              action="Wait", next=raw_next)
+                if reschedule_overdue_wait_next(candidate, today):
+                    row['next'] = candidate.next
+                    rollover_changed = True
             if needs_upgrade:
-                today = date.today()
-                sunday = end_of_current_week(today).isoformat()
-                for row in payload.get('jobs', payload.get('applications', [])):
-                    if isinstance(row, dict) and row.get('action') == 'Wait':
-                        raw_next = row.get('next')
-                        due = _parse_deadline_or_none(raw_next) if isinstance(raw_next, str) else None
-                        if due is not None and due.date() < today:
-                            row['next'] = sunday
                 payload['version'] = 9
-            if company_changed or needs_upgrade:
+            if company_changed or needs_upgrade or rollover_changed:
                 self._write(payload)
 
     def list(self) -> list[ApplicationRecord]:
