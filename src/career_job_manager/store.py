@@ -41,8 +41,9 @@ class CareerStore:
                 payload['companies'] = migrated
 
             # Correct stale Wait follow-ups and active Apply checkpoints
-            # at startup, regardless of schema version. Keep original
-            # application deadlines and explicitly urgent ASAP entries.
+            # at startup, regardless of schema version. An Apply entry with
+            # unknown deadline or stored ASAP is also scheduled this week;
+            # the original application deadline is never rewritten.
             needs_upgrade = payload.get('version', 0) < 9
             today = date.today()
             rollover_changed = False
