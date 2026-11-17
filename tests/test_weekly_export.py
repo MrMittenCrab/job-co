@@ -72,7 +72,7 @@ def test_export_cli_two_word_alias_and_custom_destination(tmp_path, monkeypatch)
     cli.main(["export", "this", "week", "--output", str(path)])
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["format"] == "jobco-weekly-agenda"
-    assert [r["id"] for r in data["items"]] == ["asap"]
+    assert [r["id"] for r in data["items"]] == ["asap", "future"]
 
 
 def test_export_cli_hyphen_alias_and_existing_full_export(tmp_path, monkeypatch):
