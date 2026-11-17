@@ -60,7 +60,7 @@ def test_changing_action_preserves_manual_next_and_chronological_position(tmp_pa
         ("Email", "Apply", "2026-11-15"),
         ("Check", "Apply", "2026-11-15"),
         ("Apply", "Check", "2026-11-15"),
-        ("Wait", "Archive", "2026-11-15"),
+        ("Wait", "Archive", "2027-11-15"),
     ]
 
     async def scenario():
