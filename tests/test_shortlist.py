@@ -245,7 +245,7 @@ def test_shortlist_schedules_this_sunday_except_earlier_cutoffs(tmp_path):
     assert store.get("future-exact").next == "2026-11-15"
 
 
-def test_shortlist_preserves_intentional_asap_and_existing_actions(tmp_path):
+def test_shortlist_schedules_apply_and_preserves_other_actions(tmp_path):
     from datetime import date
 
     store = setup_store(tmp_path)
@@ -255,11 +255,11 @@ def test_shortlist_preserves_intentional_asap_and_existing_actions(tmp_path):
     ))
     before = {r.id: r.to_dict() for r in store.list()}
     assert store.shortlist(manifest("scheduled", "check", "wait", "apply"),
-                           today=date(2026, 11, 9)) == (2, 0, 2)
+                           today=date(2026, 11, 9)) == (2, 1, 1)
     assert store.get("scheduled").next == "2026-11-15"
-    assert store.get("check").next == "2026-11-15"
-    for ident in ("wait", "apply"):
-        assert store.get(ident).to_dict() == before[ident]
+    assert store.get("check").next == "2026-11-13"
+    assert store.get("apply").next == "2026-11-13"
+    assert store.get("wait").to_dict() == before["wait"]
 
 
 def test_shortlist_day_of_week_rolls_next_week(tmp_path):
