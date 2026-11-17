@@ -351,10 +351,11 @@ class FieldRow(Static):
             # that reserve Command keys for their own menus.
             self.editor.select_all()
             self.refresh(layout=True)
-        elif key in {"super+c", "cmd+c", "ctrl+y"}:
-            # The inline editor has an all-or-none selection, not a native
-            # terminal text selection. Copy the selected text, or the entire
-            # focused field when there is no selection, without a mouse.
+        elif key in {"ctrl+c", "ctrl+y", "super+c", "cmd+c"}:
+            # Command-C is terminal-owned unless the terminal forwards it.
+            # Control-C and Control-Y reach this editor directly, even when
+            # its automatic highlight is not a native terminal selection.
+            # Copy the full field, with or without an internal selection.
             copied = self.editor.value
             if copied:
                 try:
@@ -684,7 +685,7 @@ class ApplicationScreen(Screen[bool]):
         with VerticalScroll(id="form-list"):
             for field in FORM_FIELDS:
                 yield FieldRow(field, self.values[field])
-        yield Static("↑↓ move   → edit   Ctrl+A select   Ctrl+Y copy   Enter finish   ← back   q quit", id="form-help")
+        yield Static("↑↓ move   → edit   Ctrl+A select   Ctrl+C/Y copy   Enter finish   ← back   q quit", id="form-help")
 
     def on_mount(self) -> None:
         self._sync_target_visibility()
