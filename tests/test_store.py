@@ -25,7 +25,7 @@ def make_record(**overrides):
     return ApplicationRecord(**data)
 
 
-def test_add_persists_v8_and_imports_all_document_types(tmp_path):
+def test_add_persists_v9_and_imports_all_document_types(tmp_path):
     store = CareerStore(tmp_path / "Career")
     sources = {}
     for kind in ("resume", "letter", "brochure", "form"):
@@ -43,7 +43,7 @@ def test_add_persists_v8_and_imports_all_document_types(tmp_path):
     folder = store._folder(saved)
     assert all((folder / getattr(saved, kind)).exists() for kind in ("resume", "letter", "brochure", "form"))
     payload = json.loads(store.metadata_path.read_text())
-    assert payload["version"] == 8
+    assert payload["version"] == 9
 
 
 def test_update_company_or_job_renames_folder_and_all_documents(tmp_path):
@@ -105,7 +105,7 @@ def test_delete_removes_metadata_and_application_folder(tmp_path):
     assert not folder.exists()
 
 
-def test_store_loads_legacy_apply_as_portal_and_resaves_v8(tmp_path):
+def test_store_loads_legacy_apply_as_portal_and_resaves_v9(tmp_path):
     root = tmp_path / "Career"
     root.mkdir()
     (root / "Applications").mkdir()
@@ -133,7 +133,7 @@ def test_store_loads_legacy_apply_as_portal_and_resaves_v8(tmp_path):
 
     store.update("legacy", {"contact": "Jane"})
     payload = json.loads(store.metadata_path.read_text())
-    assert payload["version"] == 8
+    assert payload["version"] == 9
     assert payload["jobs"][0]["portal"] == "https://example.com/portal"
     assert "apply" not in payload["jobs"][0]
 

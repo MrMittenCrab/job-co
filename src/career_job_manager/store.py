@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
-from .model import ApplicationRecord, sort_records, _parse_deadline_or_none, end_of_current_week
+from .model import ApplicationRecord, sort_records, _parse_deadline_or_none, end_of_current_week, reschedule_overdue_wait_next
 from .importing import parse_import
 from .naming import application_stem, readable_folder_name
 from .timing import timing_precision, timing_start, timing_end
@@ -36,8 +36,23 @@ class CareerStore:
         else:
             payload = self._document()
             migrated = [migrate_company(c) for c in payload.get('companies', [])]
-            if migrated != payload.get('companies', []):
+            company_changed = migrated != payload.get('companies', [])
+            if company_changed:
                 payload['companies'] = migrated
+
+            # One-time local upgrade; preserve application deadlines and ASAP.
+            needs_upgrade = payload.get('version', 0) < 9
+            if needs_upgrade:
+                today = date.today()
+                sunday = end_of_current_week(today).isoformat()
+                for row in payload.get('jobs', payload.get('applications', [])):
+                    if isinstance(row, dict) and row.get('action') == 'Wait':
+                        raw_next = row.get('next')
+                        due = _parse_deadline_or_none(raw_next) if isinstance(raw_next, str) else None
+                        if due is not None and due.date() < today:
+                            row['next'] = sunday
+                payload['version'] = 9
+            if company_changed or needs_upgrade:
                 self._write(payload)
 
     def list(self) -> list[ApplicationRecord]:
@@ -317,6 +332,8 @@ class CareerStore:
         )
         updated.validate(preserve_action=_preserve_existing_actions,
                          preserve_legacy_deadline=preserve_legacy_deadline)
+        if not _preserve_existing_actions and old.action != "Wait" and updated.action == "Wait":
+            reschedule_overdue_wait_next(updated, date.today())
 
         old_stem = application_stem(old.company, old.job)
         new_stem = application_stem(updated.company, updated.job)
@@ -425,7 +442,7 @@ class CareerStore:
     def _save(self, records: list[ApplicationRecord]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         payload = self._document()
-        payload.update(version=8, jobs=[record.to_dict() for record in records])
+        payload.update(version=9, jobs=[record.to_dict() for record in records])
         payload.pop('applications', None)
         payload.setdefault('companies', [])
         self._write(payload)
