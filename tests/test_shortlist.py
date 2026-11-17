@@ -31,18 +31,23 @@ def manifest(*ids):
     return {"schema_version": 1, "shortlist": list(ids)}
 
 
-def test_promote_only_check_preserve_other_actions_and_fields(tmp_path):
+def test_shortlist_promotes_check_and_schedules_apply_without_changing_other_actions(tmp_path):
+    from datetime import date
+
     store = setup_store(tmp_path)
     before = {job["id"]: job for job in store.export_data()["jobs"]}
-    count = store.shortlist(manifest("external-check", "apply", "wait", "take", "archive"))
-    assert count == (1, 0, 4)
+    selected = manifest("external-check", "apply", "wait", "take", "archive")
+    count = store.shortlist(selected, today=date(2026, 11, 9))
+    assert count == (1, 1, 3)
     after = {job["id"]: job for job in store.export_data()["jobs"]}
     for id, previous in before.items():
         if id == "check":
-            assert after[id] == {**previous, "action": "Apply"}
+            assert after[id] == {**previous, "action": "Apply", "next": "2026-11-13"}
+        elif id == "apply":
+            assert after[id] == {**previous, "next": "2026-11-13"}
         else:
             assert after[id] == previous
-    assert store.shortlist(manifest("check", "apply", "wait", "take", "archive")) == (0, 0, 5)
+    assert store.shortlist(selected, today=date(2026, 11, 9)) == (0, 0, 5)
 
 
 def test_unknown_id_aborts_everything_without_partial_application(tmp_path):
@@ -240,7 +245,7 @@ def test_shortlist_schedules_this_sunday_except_earlier_cutoffs(tmp_path):
     assert store.get("future-exact").next == "2026-11-15"
 
 
-def test_shortlist_preserves_intentional_asap_and_existing_actions(tmp_path):
+def test_shortlist_schedules_apply_and_preserves_other_actions(tmp_path):
     from datetime import date
 
     store = setup_store(tmp_path)
@@ -250,11 +255,11 @@ def test_shortlist_preserves_intentional_asap_and_existing_actions(tmp_path):
     ))
     before = {r.id: r.to_dict() for r in store.list()}
     assert store.shortlist(manifest("scheduled", "check", "wait", "apply"),
-                           today=date(2026, 11, 9)) == (2, 0, 2)
+                           today=date(2026, 11, 9)) == (2, 1, 1)
     assert store.get("scheduled").next == "2026-11-15"
-    assert store.get("check").next == "ASAP"
-    for ident in ("wait", "apply"):
-        assert store.get(ident).to_dict() == before[ident]
+    assert store.get("check").next == "2026-11-13"
+    assert store.get("apply").next == "2026-11-13"
+    assert store.get("wait").to_dict() == before["wait"]
 
 
 def test_shortlist_day_of_week_rolls_next_week(tmp_path):
@@ -307,15 +312,15 @@ def test_already_apply_records_are_scheduled_for_this_week(tmp_path):
                            today=today) == (0, 0, 4)
 
 
-def test_existing_apply_asap_is_not_replaced_by_shortlist(tmp_path):
+def test_existing_apply_asap_is_replaced_by_shortlist_weekly_next(tmp_path):
     from datetime import date
     store = CareerStore(tmp_path / "keep-asap")
     store.add(ApplicationRecord(
         id="asap", company="Firm", job="Research",
         action="Apply", deadline="2026-11-30", next="ASAP",
     ))
-    assert store.shortlist(manifest("asap"), today=date(2026, 11, 9)) == (0, 0, 1)
-    assert store.get("asap").next == "ASAP"
+    assert store.shortlist(manifest("asap"), today=date(2026, 11, 9)) == (0, 1, 0)
+    assert store.get("asap").next == "2026-11-15"
 
 
 def test_already_apply_earlier_exact_deadline_is_respected(tmp_path):

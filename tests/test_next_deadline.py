@@ -44,8 +44,8 @@ def test_weekly_default_never_exceeds_earlier_application_deadline():
 
 def test_recruitment_opening_timing_without_closing_date_reviews_weekly():
     today = date(2026, 11, 9)
-    assert default_next(record(when="2026-09", deadline=""), today) == "2026-09-06"
-    assert default_next(record(when="2026-12", deadline=""), today) == "2026-12-06"
+    assert default_next(record(when="2026-09", deadline=""), today) == "2026-11-15"
+    assert default_next(record(when="2026-12", deadline=""), today) == "2026-11-15"
 
 
 def test_stage_actions_follow_original_exact_deadline_unless_next_overridden():
@@ -55,7 +55,9 @@ def test_stage_actions_follow_original_exact_deadline_unless_next_overridden():
         assert default_next(app, today) == "2026-11-13"
         assert app.deadline == "2026-11-13"
         app.next = "ASAP"
-        assert next_value(app, today) == "ASAP"
+        assert next_value(app, today) == (
+            "2026-11-13" if action == "Apply" else "ASAP"
+        )
 
 
 def test_wait_uses_original_application_cutoff_as_next_until_user_overrides():
@@ -99,7 +101,7 @@ def test_wait_vague_future_and_current_deadlines_follow_period_checkpoints():
 
 def test_asap_only_for_next_and_sorting_uses_next_date():
     today = date(2026, 11, 9)
-    asap = record("asap", next="ASAP")
+    asap = record("asap", action="Take", next="ASAP")
     dated = record("dated", next="2026-11-10", deadline="2026-11-30")
     auto = record("auto", deadline="2026-11-30")
     expired = record("expired", deadline="2026-09-01")
@@ -180,10 +182,10 @@ def test_future_and_active_vague_deadline_uses_correct_week_end(period, today, e
     ("2027-10..2027-12", date(2026, 11, 9), "2027-10-03"),
     ("2027-03-01", date(2026, 11, 9), "2027-03-01"),
 ])
-def test_future_vague_recruitment_opening_uses_first_sunday_but_exact_is_unchanged(
+def test_check_future_vague_recruitment_opening_uses_first_sunday_but_exact_is_unchanged(
     opening, today, expected,
 ):
-    app = record(deadline="", when=opening)
+    app = record(action="Check", deadline="", when=opening)
     assert default_next(app, today) == expected
     assert app.next == ""
 
@@ -238,7 +240,7 @@ def test_strict_chronological_sort_and_today_position():
 
 def test_past_vague_opening_period_never_remains_unclear():
     today = date(2026, 11, 9)
-    assert default_next(record(when="2026-09", deadline=""), today) == "2026-09-06"
+    assert default_next(record(when="2026-09", deadline=""), today) == "2026-11-15"
     assert default_next(record(when="2026-fall", deadline=""), today) == "2026-11-15"
     assert default_next(record(when="2026-01-01", deadline=""), today) == "2026-11-15"
 
@@ -296,9 +298,12 @@ def test_overdue_manual_wait_next_rolls_but_asap_and_future_are_preserved():
     ("2026-11-17 12:00", "2027-01-01", "2026-11-17 12:00"),
     ("2027-spring", "2026-11-15", "2026-11-22"),
     ("2026-11", "2026-11-15", "2026-11-22"),
-    ("2026-11-18", "ASAP", "ASAP"),
+    ("2026-11-18", "ASAP", "2026-11-18"),
     ("2026-11-16", "2026-11-15", "2026-11-15"),
-    ("", "2026-11-15", "2026-11-15"),
+    ("", "2026-11-15", "2026-11-22"),
+    ("", "ASAP", "2026-11-22"),
+    ("uncertain", "2026-11-15", "2026-11-22"),
+    ("2026-11-16", "ASAP", "ASAP"),
 ])
 def test_apply_weekly_next_with_cutoff_and_exceptions(deadline, stored_next, expected):
     active = record(action="Apply", deadline=deadline, next=stored_next)

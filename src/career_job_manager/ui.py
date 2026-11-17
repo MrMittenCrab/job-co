@@ -855,7 +855,7 @@ class ApplicationScreen(Screen[bool]):
                     self._auto_next = False
                 elif value == "Apply" and not self._auto_next:
                     due = apply_weekly_next(candidate, date.today())
-                    if due is not None and self.values["Next"].upper() != "ASAP":
+                    if due is not None:
                         self.values["Next"] = due
                         self._row("Next").set_value(due)
 

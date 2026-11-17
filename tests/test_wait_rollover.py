@@ -201,14 +201,16 @@ def test_apply_existing_stale_date_changes_on_startup_even_with_version9(tmp_pat
     assert next_value(store.get("flow"), today) == "2026-11-22"
     assert next_value(store.get("point72"), today) == "2026-11-22"
     assert next_value(store.get("capula"), today) == "2026-11-20 15:00"
+    assert next_value(store.get("unknown"), today) == "2026-11-22"
+    assert next_value(store.get("priority"), today) == "2026-11-22"
 
     reloaded = CareerStore(root)
     assert reloaded.get("flow").next == "2026-11-22"
     assert reloaded.get("point72").next == "2026-11-22"
     assert reloaded.get("capula").next == "2026-11-20 15:00"
     assert reloaded.get("pimco").next == "2026-11-14"
-    assert reloaded.get("unknown").next == "2026-11-15"
-    assert reloaded.get("priority").next == "ASAP"
+    assert reloaded.get("unknown").next == "2026-11-22"
+    assert reloaded.get("priority").next == "2026-11-22"
     assert reloaded.get("flow").deadline == "2026-12-31"
 
     previous = reloaded.metadata_path.read_bytes()
@@ -254,5 +256,62 @@ def test_apply_detail_previews_week_end_for_unexpired_deadline(tmp_path, monkeyp
             screen.action_save()
             await pilot.pause()
             assert store.get("point72").next == "2026-11-22"
+
+    asyncio.run(scenario())
+
+
+
+def test_unknown_apply_rolls_to_sunday_each_week_without_rewriting_deadline(tmp_path, monkeypatch):
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    root = tmp_path / "career"
+    store = CareerStore(root)
+    for key, deadline, next_due in (
+        ("flow", "", "2026-11-15"),
+        ("point72", "", "2026-11-15"),
+        ("qube", "", "2026-11-15"),
+        ("schonfeld", "", "2026-11-15"),
+        ("verition", "", "2026-11-15"),
+        ("jpm", "", "ASAP"),
+    ):
+        store.add(make_record(key, action="Apply", deadline=deadline, next=next_due))
+    store.add(make_record("wait", action="Wait", deadline="", next="ASAP"))
+    store.add(make_record("email", action="Email", deadline="", next="ASAP"))
+
+    assert all(next_value(store.get(key), date(2026, 11, 17)) == "2026-11-22"
+               for key in ("flow", "point72", "qube", "schonfeld", "verition", "jpm"))
+    opened = CareerStore(root)
+    for key in ("flow", "point72", "qube", "schonfeld", "verition", "jpm"):
+        assert opened.get(key).next == "2026-11-22"
+        assert opened.get(key).deadline == ""
+    assert opened.get("wait").next == "ASAP"
+    assert opened.get("email").next == "ASAP"
+
+    FrozenDate.current = date(2026, 11, 24)
+    opened_again = CareerStore(root)
+    assert all(opened_again.get(key).next == "2026-11-29"
+               for key in ("flow", "point72", "qube", "schonfeld", "verition", "jpm"))
+
+
+def test_unknown_apply_action_change_updates_display_and_store(tmp_path, monkeypatch):
+    FrozenDate.current = date(2026, 11, 17)
+    monkeypatch.setattr(store_module, "date", FrozenDate)
+    monkeypatch.setattr(ui_module, "date", FrozenDate)
+
+    async def scenario():
+        store = CareerStore(tmp_path / "career")
+        store.add(make_record("jpm", action="Email", deadline="", next="ASAP"))
+        app = CareerApp(store)
+        async with app.run_test() as pilot:
+            await app.push_screen(ApplicationScreen(store, "jpm"))
+            await pilot.pause()
+            screen = app.screen
+            screen._after_choice("Action", "Apply")
+            assert screen.values["Next"] == "2026-11-22"
+            screen.action_save()
+            await pilot.pause()
+            assert store.get("jpm").action == "Apply"
+            assert store.get("jpm").next == "2026-11-22"
+            assert store.get("jpm").deadline == ""
 
     asyncio.run(scenario())

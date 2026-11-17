@@ -305,14 +305,16 @@ def _season_end(today: date) -> date:
 
 
 def apply_weekly_next(record: ApplicationRecord, today: date) -> str | None:
-    """Schedule an open Apply deadline for the current week, never past cutoff.
+    """Apply always needs a current-week follow-up unless a known cutoff passed.
 
-    An exact cutoff earlier than Sunday keeps its date and optional clock time.
-    Missing, invalid, or already-expired deadlines do not trigger this rule.
+    A known, earlier cutoff takes priority over Sunday (including its time).
+    An unknown or missing deadline is not evidence that the cutoff expired.
     """
-    if record.action != "Apply" or not record.deadline:
+    if record.action != "Apply":
         return None
     sunday = end_of_current_week(today)
+    if not record.deadline:
+        return sunday.isoformat()
     exact = _parse_deadline_or_none(record.deadline)
     if exact:
         if exact.date() < today:
@@ -321,15 +323,18 @@ def apply_weekly_next(record: ApplicationRecord, today: date) -> str | None:
     try:
         end = timing.timing_end(record.deadline)
     except (ValueError, TypeError):
-        return None
+        return sunday.isoformat()
     if end < today:
         return None
     return min(sunday, end).isoformat()
 
 
 def reschedule_unexpired_apply_next(record: ApplicationRecord, today: date) -> bool:
-    """Persist a weekly Apply checkpoint only when Next is already dated."""
-    if not record.next or record.next.upper() == "ASAP":
+    """Normalize an explicit Apply Next (including ASAP) to its weekly review.
+
+    Leave an empty Next empty so automatically scheduled records stay dynamic.
+    """
+    if not record.next:
         return False
     due = apply_weekly_next(record, today)
     if due is None or due == record.next:
@@ -341,14 +346,14 @@ def reschedule_unexpired_apply_next(record: ApplicationRecord, today: date) -> b
 def default_next(record: ApplicationRecord, today: date) -> str:
     """Derive Next without ever mutating the original application Deadline.
 
-    Apply with an unexpired deadline -> this Sunday (or earlier cutoff).
+    Apply without a confirmed expired deadline -> this Sunday (or earlier cutoff).
     Wait with an expired confirmed application deadline -> current-week Sunday.
     Otherwise, exact deadline -> exact date/time; vague deadline ->
     the first-week Sunday before its period or after it ends, and the
     current-week Sunday during the period. With no confirmed deadline,
     use the recorded recruitment opening ('when') checkpoint.
     A manually dated overdue Wait Next also rolls to Sunday via next_value().
-    Explicit ASAP is never rolled over.
+    An Apply ASAP is a weekly checkpoint; other actions retain ASAP.
     """
     if record.action == "Archive":
         return ""
@@ -405,11 +410,11 @@ def next_value(record: ApplicationRecord, today: date) -> str:
 
     Never write metadata as a side effect of drawing or sorting a row.
     """
-    if record.next and record.next.upper() == "ASAP":
-        return "ASAP"
     apply_due = apply_weekly_next(record, today)
     if apply_due is not None:
         return apply_due
+    if record.next and record.next.upper() == "ASAP":
+        return "ASAP"
     if record.next:
         due = _parse_deadline_or_none(record.next)
         if due:

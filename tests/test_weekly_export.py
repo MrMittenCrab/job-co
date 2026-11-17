@@ -35,7 +35,7 @@ def test_this_week_end_includes_asap_overdue_manual_and_sunday():
     assert result["week_ending"] == "2026-11-15"
     assert result["format"] == "jobco-weekly-agenda"
     ids = [r["id"] for r in result["items"]]
-    assert ids == ["overdue", "asap", "close", "wait", "vague", "sun"]
+    assert ids == ["overdue", "asap", "close", "mon", "wait", "vague", "sun"]
     assert "expired" not in ids
     assert "archived" not in ids
 
@@ -72,7 +72,7 @@ def test_export_cli_two_word_alias_and_custom_destination(tmp_path, monkeypatch)
     cli.main(["export", "this", "week", "--output", str(path)])
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["format"] == "jobco-weekly-agenda"
-    assert [r["id"] for r in data["items"]] == ["asap"]
+    assert [r["id"] for r in data["items"]] == ["asap", "future"]
 
 
 def test_export_cli_hyphen_alias_and_existing_full_export(tmp_path, monkeypatch):
