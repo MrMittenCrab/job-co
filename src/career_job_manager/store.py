@@ -79,7 +79,7 @@ class CareerStore:
         """Activate shortlisted Check/Apply jobs and schedule them this week.
 
         Check -> Apply; already-Apply records are also scheduled for Sunday.
-        All other Actions and ASAP Next values remain unchanged.
+        All other Actions remain unchanged; Apply entries use a dated review.
         """
 
         today = today or date.today()
@@ -150,7 +150,7 @@ class CareerStore:
             if old_action == "Check":
                 row["action"] = "Apply"
                 promoted += 1
-            if str(row.get("next", "")).upper() != "ASAP" and row.get("next") != next_due:
+            if row.get("next") != next_due:
                 row["next"] = next_due
                 if old_action == "Apply":
                     rescheduled += 1
