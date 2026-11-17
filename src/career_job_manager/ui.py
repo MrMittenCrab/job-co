@@ -15,7 +15,7 @@ from textual.widgets import Input, Static
 from .clipboard import copy_native_clipboard
 from .editing import InlineBuffer, editor_for_field, normalize_pasted_text
 from .filepicker import choose_file, reveal_file
-from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records, today_position, next_value, reschedule_overdue_wait_next
+from .model import ApplicationRecord, action_uses_target, default_next, deadline_due_within_two_weeks, undated_application_needing_review, effective_queue_date, filter_records, today_position, next_value, apply_weekly_next, reschedule_overdue_wait_next
 from .presentation import (
     ACTION_COLORS,
     DESCRIPTION_TEXT_FIELD,
@@ -842,17 +842,22 @@ class ApplicationScreen(Screen[bool]):
             self._sync_target_visibility()
             if value != old and self._auto_next:
                 self._refresh_auto_next()
-            if value != old and value == "Wait":
+            if value != old and value in {"Wait", "Apply"}:
                 candidate = ApplicationRecord(
                     id="", company=self.values["Company"], job=self.values["Job"],
-                    action="Wait", deadline=self.values["Deadline"],
+                    action=value, deadline=self.values["Deadline"],
                     next="" if self._auto_next else self.values["Next"],
                     when=self.record.when if self.record else "",
                 )
-                if reschedule_overdue_wait_next(candidate, date.today()):
+                if value == "Wait" and reschedule_overdue_wait_next(candidate, date.today()):
                     self.values["Next"] = candidate.next
                     self._row("Next").set_value(candidate.next)
                     self._auto_next = False
+                elif value == "Apply" and not self._auto_next:
+                    due = apply_weekly_next(candidate, date.today())
+                    if due is not None and self.values["Next"].upper() != "ASAP":
+                        self.values["Next"] = due
+                        self._row("Next").set_value(due)
 
     def _view_document(self, field: str) -> None:
         name = getattr(self.record, field.lower(), "") if self.record else ""
