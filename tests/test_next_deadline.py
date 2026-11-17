@@ -31,15 +31,15 @@ def test_current_month_and_current_season_close_get_a_weekly_review():
     for cutoff in ("2026-11", "2026-fall", "Fall 2026"):
         app = record(deadline=normalize_deadline(cutoff))
         assert next_value(app, today) == "2026-11-15"
-    assert next_value(record(deadline="2026-11-30"), today) == "2026-11-30"
+    assert next_value(record(deadline="2026-11-30"), today) == "2026-11-15"
 
 
 def test_weekly_default_never_exceeds_earlier_application_deadline():
     today = date(2026, 11, 9)
     assert default_next(record(deadline="2026-11-13"), today) == "2026-11-13"
     assert default_next(record(deadline="2026-11-09"), today) == "2026-11-09"
-    assert default_next(record(deadline="2026-12-01"), today) == "2026-12-01"
-    assert default_next(record(deadline="2026-winter"), today) == "2026-12-06"
+    assert default_next(record(deadline="2026-12-01"), today) == "2026-11-15"
+    assert default_next(record(deadline="2026-winter"), today) == "2026-11-15"
 
 
 def test_recruitment_opening_timing_without_closing_date_reviews_weekly():
@@ -106,7 +106,7 @@ def test_asap_only_for_next_and_sorting_uses_next_date():
     archive = record("archive", action="Archive", next="ASAP")
     assert [r.id for r in sort_records(
         [archive, expired, auto, dated, asap], today=today,
-    )] == ["expired", "asap", "dated", "auto", "archive"]
+    )] == ["expired", "asap", "auto", "dated", "archive"]
     assert normalize_next("aSaP") == "ASAP"
     with pytest.raises(ValueError, match="Deadline cannot be ASAP"):
         normalize_deadline("ASAP")
@@ -155,15 +155,15 @@ def test_manual_edit_can_clear_next_to_restore_auto_weekly_default(tmp_path):
 
 
 @pytest.mark.parametrize(("period", "today", "expected"), [
-    ("2027-spring", date(2026, 11, 9), "2027-03-07"),
+    ("2027-spring", date(2026, 11, 9), "2026-11-15"),
     ("2027-spring", date(2027, 3, 1), "2027-03-07"),
     ("2027-spring", date(2027, 3, 10), "2027-03-14"),
     ("2027-spring", date(2027, 3, 17), "2027-03-21"),
     ("2027-spring", date(2027, 5, 30), "2027-05-30"),
-    ("2027-10", date(2026, 11, 9), "2027-10-03"),
+    ("2027-10", date(2026, 11, 9), "2026-11-15"),
     ("2027-10", date(2027, 10, 5), "2027-10-10"),
-    ("2027-10..2027-12", date(2026, 11, 9), "2027-10-03"),
-    ("2026-winter", date(2026, 11, 9), "2026-12-06"),
+    ("2027-10..2027-12", date(2026, 11, 9), "2026-11-15"),
+    ("2026-winter", date(2026, 11, 9), "2026-11-15"),
     ("2026-winter", date(2027, 1, 11), "2027-01-17"),
 ])
 def test_future_and_active_vague_deadline_uses_correct_week_end(period, today, expected):
@@ -188,10 +188,12 @@ def test_future_vague_recruitment_opening_uses_first_sunday_but_exact_is_unchang
     assert app.next == ""
 
 
-def test_manually_set_next_never_rolls_with_future_vague_deadline():
+def test_apply_unexpired_deadline_replaces_stale_manual_next_weekly():
     app = record(deadline="2027-spring", next="2027-04-12")
-    assert next_value(app, date(2026, 11, 9)) == "2027-04-12"
-    assert next_value(app, date(2027, 3, 17)) == "2027-04-12"
+    assert next_value(app, date(2026, 11, 9)) == "2026-11-15"
+    assert next_value(app, date(2027, 3, 17)) == "2027-03-21"
+    assert app.next == "2027-04-12"
+    assert app.deadline == "2027-spring"
 
 
 @pytest.mark.parametrize(("cutoff", "today", "expected"), [
@@ -206,6 +208,8 @@ def test_vague_period_always_resolves_to_specific_calendar_date(cutoff, today, e
         app = record(action=action, deadline=cutoff)
         from career_job_manager.timing import timing_end
         want = end_of_current_week(today).isoformat() if action == "Wait" and timing_end(cutoff) < today else expected
+        if action == "Apply" and timing_end(cutoff) >= today:
+            want = min(end_of_current_week(today), timing_end(cutoff)).isoformat()
         assert next_value(app, today) == want
         assert app.next == ""
         assert app.deadline == cutoff
@@ -282,3 +286,29 @@ def test_overdue_manual_wait_next_rolls_but_asap_and_future_are_preserved():
     for action in ("Apply", "Take", "Go", "Email", "Respond", "Check"):
         other = record(action=action, deadline="2026-10-01")
         assert default_next(other, today) == "2026-10-01"
+
+
+
+@pytest.mark.parametrize(("deadline", "stored_next", "expected"), [
+    ("2026-12-31", "2026-11-15", "2026-11-22"),
+    ("2027-04-01", "2027-04-01", "2026-11-22"),
+    ("2026-11-21 18:30", "2026-12-10", "2026-11-21 18:30"),
+    ("2026-11-17 12:00", "2027-01-01", "2026-11-17 12:00"),
+    ("2027-spring", "2026-11-15", "2026-11-22"),
+    ("2026-11", "2026-11-15", "2026-11-22"),
+    ("2026-11-18", "ASAP", "ASAP"),
+    ("2026-11-16", "2026-11-15", "2026-11-15"),
+    ("", "2026-11-15", "2026-11-15"),
+])
+def test_apply_weekly_next_with_cutoff_and_exceptions(deadline, stored_next, expected):
+    active = record(action="Apply", deadline=deadline, next=stored_next)
+    assert next_value(active, date(2026, 11, 17)) == expected
+    assert active.next == stored_next
+    assert active.deadline == deadline
+
+
+def test_other_actions_with_future_deadline_preserve_explicit_next():
+    today = date(2026, 11, 17)
+    for action in ("Wait", "Take", "Go", "Email", "Check", "Respond"):
+        entry = record(action=action, deadline="2026-12-31", next="2026-11-19")
+        assert next_value(entry, today) == "2026-11-19"
