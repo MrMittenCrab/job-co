@@ -115,6 +115,18 @@ def test_distinct_intake_years_can_coexist(tmp_path):
     assert store.import_jobs(incoming).jobs == (2, 0)
 
 
+def test_distinct_cities_are_not_automatically_treated_as_duplicate():
+    first = ApplicationRecord(
+        id="hk", company="Verition Fund Management",
+        job="2027 Investment Internship — Hong Kong", when="2026-10",
+    )
+    second = ApplicationRecord(
+        id="sg", company="Verition", job="2027 Investment Internship — Singapore",
+        when="2026-10",
+    )
+    assert find_duplicates([first, second]) == []
+
+
 def test_read_only_duplicates_command_preserves_records(tmp_path, monkeypatch, capsys):
     store = CareerStore(tmp_path / "data")
     store.add(app("manual", "Wait"))
