@@ -79,10 +79,10 @@ def test_one_time_migration_corrects_four_existing_wait_entries(tmp_path, monkey
     assert CareerStore(root).get("gaw").next == "2026-11-29"
 
 
-def test_auto_wait_with_expired_cutoff_reviews_this_week_not_asap():
+def test_auto_wait_with_expired_cutoff_stays_overdue():
     wait = make_record("wait", action="Wait", deadline="2026-11-15")
-    assert next_value(wait, date(2026, 11, 17)) == "2026-11-22"
-    assert next_value(wait, date(2026, 11, 24)) == "2026-11-29"
+    assert next_value(wait, date(2026, 11, 17)) == "2026-11-15"
+    assert next_value(wait, date(2026, 11, 24)) == "2026-11-15"
     assert wait.next == ""
     assert wait.deadline == "2026-11-15"
 
@@ -102,10 +102,10 @@ def test_ui_previews_rollover_when_wait_selected(tmp_path, monkeypatch):
             screen = app.screen
             screen._after_choice("Action", "Wait")
             assert screen.values["Next"] == "2026-11-22"
-            assert not screen._auto_next
+            assert screen._auto_next
             screen.action_save()
             await pilot.pause()
-            assert store.get("jefferies").next == "2026-11-22"
+            assert store.get("jefferies").next == ""
 
     asyncio.run(scenario())
 
@@ -142,7 +142,7 @@ def test_version9_overdue_wait_self_heals_on_next_startup(tmp_path, monkeypatch)
     assert CareerStore(root).metadata_path.read_bytes() == before
 
 
-def test_model_never_leaves_an_explicit_wait_next_in_past():
+def test_model_ignores_manual_wait_next_for_weekly_deadline():
     from career_job_manager.model import sort_records
     today = date(2026, 11, 17)
     stale = make_record("gaw", action="Wait", next="2026-11-15")
@@ -153,8 +153,8 @@ def test_model_never_leaves_an_explicit_wait_next_in_past():
     assert [r.id for r in sort_records([stale, tomorrow, asap], today=today)] == [
         "asap", "future", "gaw",
     ]
-    assert next_value(tomorrow, today) == "2026-11-18"
-    assert next_value(asap, today) == "ASAP"
+    assert next_value(tomorrow, today) == "2026-11-22"
+    assert next_value(asap, today) == "2026-11-22"
 
 
 def test_detail_screen_displays_effective_next_for_existing_wait(tmp_path, monkeypatch):
@@ -171,10 +171,10 @@ def test_detail_screen_displays_effective_next_for_existing_wait(tmp_path, monke
             await pilot.pause()
             screen = app.screen
             assert screen.values["Next"] == "2026-11-22"
-            assert not screen._auto_next
+            assert screen._auto_next
             screen.action_save()
             await pilot.pause()
-            assert store.get("hkex").next == "2026-11-22"
+            assert store.get("hkex").next == ""
 
     asyncio.run(scenario())
 
@@ -246,7 +246,7 @@ def test_apply_detail_previews_week_end_for_unexpired_deadline(tmp_path, monkeyp
             assert screen.values["Next"] == "2026-11-22"
             screen.action_save()
             await pilot.pause()
-            assert store.get("flow").next == "2026-11-22"
+            assert store.get("flow").next == ""
 
             await app.push_screen(ApplicationScreen(store, "point72"))
             await pilot.pause()
@@ -255,7 +255,7 @@ def test_apply_detail_previews_week_end_for_unexpired_deadline(tmp_path, monkeyp
             assert screen.values["Next"] == "2026-11-22"
             screen.action_save()
             await pilot.pause()
-            assert store.get("point72").next == "2026-11-22"
+            assert store.get("point72").next == ""
 
     asyncio.run(scenario())
 
@@ -311,7 +311,7 @@ def test_unknown_apply_action_change_updates_display_and_store(tmp_path, monkeyp
             screen.action_save()
             await pilot.pause()
             assert store.get("jpm").action == "Apply"
-            assert store.get("jpm").next == "2026-11-22"
+            assert store.get("jpm").next == ""
             assert store.get("jpm").deadline == ""
 
     asyncio.run(scenario())
