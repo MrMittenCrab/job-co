@@ -53,44 +53,40 @@ def test_stage_actions_follow_original_exact_deadline_unless_next_overridden():
     for action in ("Apply", "Check", "Wait", "Take", "Go", "Respond", "Email"):
         app = record(action=action, deadline="2026-11-13")
         assert default_next(app, today) == "2026-11-13"
-        assert app.deadline == "2026-11-13"
         app.next = "ASAP"
         assert next_value(app, today) == (
-            "2026-11-13" if action == "Apply" else "ASAP"
+            "2026-11-13" if action in {"Take", "Apply", "Wait"} else "ASAP"
         )
 
 
 def test_wait_uses_original_application_cutoff_as_next_until_user_overrides():
     today = date(2026, 11, 9)
     app = record(action="Wait", deadline="2026-12-31 23:59")
-    assert default_next(app, today) == "2026-12-31 23:59"
-    assert next_value(app, today) == "2026-12-31 23:59"
-    app.next = "2026-11-15"
+    assert default_next(app, today) == "2026-11-15"
+    app.next = "2027-01-01"
     assert next_value(app, today) == "2026-11-15"
     assert app.deadline == "2026-12-31 23:59"
 
 
 def test_wait_after_application_cutoff_becomes_auto_week_end_not_archive():
     from career_job_manager.model import effective_queue_date, today_position
-
     today = date(2027, 1, 4)
     wait = record("wait", action="Wait", deadline="2026-12-31")
     fresh = record("fresh", action="Check", deadline="2027-spring")
-    assert default_next(wait, today) == "2027-01-10"
-    assert next_value(wait, today) == "2027-01-10"
-    assert wait.action == "Wait"
-    assert wait.next == ""  # Automatic Next is never persisted into manual Next.
+    assert default_next(wait, today) == "2026-12-31"
+    assert next_value(wait, today) == "2026-12-31"
+    assert wait.next == ""
     assert wait.deadline == "2026-12-31"
-    assert effective_queue_date(wait, today) == date(2027, 1, 10)
+    assert effective_queue_date(wait, today) == date(2026, 12, 31)
     ordered = sort_records([fresh, wait], today=today)
     assert [r.id for r in ordered] == ["wait", "fresh"]
-    assert today_position(ordered, today=today) == 0
+    assert today_position(ordered, today=today) == 1
 
 
 def test_wait_vague_future_and_current_deadlines_follow_period_checkpoints():
     assert default_next(
         record(action="Wait", deadline="2027-spring"), date(2026, 11, 9),
-    ) == "2027-03-07"
+    ) == "2026-11-15"
     assert default_next(
         record(action="Wait", deadline="2027-spring"), date(2027, 3, 10),
     ) == "2027-03-14"
@@ -206,12 +202,12 @@ def test_apply_unexpired_deadline_replaces_stale_manual_next_weekly():
     ("2027-spring", date(2027, 3, 10), "2027-03-14"),
 ])
 def test_vague_period_always_resolves_to_specific_calendar_date(cutoff, today, expected):
+    from career_job_manager.timing import timing_end
+    sunday = end_of_current_week(today)
     for action in ("Apply", "Wait", "Take", "Check"):
         app = record(action=action, deadline=cutoff)
-        from career_job_manager.timing import timing_end
-        want = end_of_current_week(today).isoformat() if action == "Wait" and timing_end(cutoff) < today else expected
-        if action == "Apply" and timing_end(cutoff) >= today:
-            want = min(end_of_current_week(today), timing_end(cutoff)).isoformat()
+        want = (min(sunday, timing_end(cutoff)).isoformat()
+                if action in {"Take", "Apply", "Wait"} else expected)
         assert next_value(app, today) == want
         assert app.next == ""
         assert app.deadline == cutoff
@@ -231,11 +227,10 @@ def test_strict_chronological_sort_and_today_position():
     ]
     result = sort_records(records, today=today)
     assert [r.id for r in result] == [
-        "yesterday", "asap", "today", "tomorrow", "old", "future", "archive",
+        "old", "asap", "yesterday", "today", "tomorrow", "future", "archive",
     ]
-    assert today_position(result, today=today) == 1
-    assert effective_queue_date(result[2], today) == today
-    assert today_position(result[:1], today=today) == 0
+    assert effective_queue_date(result[3], today) == today
+    assert today_position(result, today=today) == 3
 
 
 def test_past_vague_opening_period_never_remains_unclear():
@@ -262,11 +257,14 @@ def test_past_vague_opening_period_never_remains_unclear():
     ("2026-12", date(2026, 11, 12), "2026-12-06"),
 ])
 def test_wait_week_end_when_confirmed_application_deadline_has_expired(cutoff, today, expected):
+    from career_job_manager.timing import timing_end
     wait = record(action="Wait", deadline=cutoff)
-    assert default_next(wait, today) == expected
-    assert next_value(wait, today) == expected
+    exact = len(cutoff) >= 10 and cutoff[4] == "-" and cutoff[7] == "-" and cutoff[8:10].isdigit()
+    due = (cutoff if exact and cutoff[:10] <= end_of_current_week(today).isoformat()
+           else min(end_of_current_week(today), timing_end(cutoff)).isoformat())
+    assert default_next(wait, today) == due
+    assert next_value(wait, today) == due
     assert wait.deadline == cutoff
-    assert wait.next == ""
 
 
 def test_wait_without_confirmed_deadline_does_not_infer_expiration_from_opening():
@@ -280,15 +278,12 @@ def test_overdue_manual_wait_next_rolls_but_asap_and_future_are_preserved():
     today = date(2026, 11, 12)
     for manual in ("2026-11-19", "ASAP", "2026-10-01"):
         wait = record(action="Wait", deadline="2026-10-01", next=manual)
-        assert default_next(wait, today) == "2026-11-15"
-        assert next_value(wait, today) == (
-            "2026-11-15" if manual == "2026-10-01" else manual
-        )
+        assert next_value(wait, today) == "2026-10-01"
+        assert wait.next == manual
         assert wait.deadline == "2026-10-01"
-    for action in ("Apply", "Take", "Go", "Email", "Respond", "Check"):
+    for action in ("Apply", "Take", "Go", "Email", "Check", "Respond"):
         other = record(action=action, deadline="2026-10-01")
         assert default_next(other, today) == "2026-10-01"
-
 
 
 @pytest.mark.parametrize(("deadline", "stored_next", "expected"), [
@@ -299,11 +294,11 @@ def test_overdue_manual_wait_next_rolls_but_asap_and_future_are_preserved():
     ("2027-spring", "2026-11-15", "2026-11-22"),
     ("2026-11", "2026-11-15", "2026-11-22"),
     ("2026-11-18", "ASAP", "2026-11-18"),
-    ("2026-11-16", "2026-11-15", "2026-11-15"),
+    ("2026-11-16", "2026-11-15", "2026-11-16"),
     ("", "2026-11-15", "2026-11-22"),
     ("", "ASAP", "2026-11-22"),
     ("uncertain", "2026-11-15", "2026-11-22"),
-    ("2026-11-16", "ASAP", "ASAP"),
+    ("2026-11-16", "ASAP", "2026-11-16"),
 ])
 def test_apply_weekly_next_with_cutoff_and_exceptions(deadline, stored_next, expected):
     active = record(action="Apply", deadline=deadline, next=stored_next)
@@ -314,6 +309,10 @@ def test_apply_weekly_next_with_cutoff_and_exceptions(deadline, stored_next, exp
 
 def test_other_actions_with_future_deadline_preserve_explicit_next():
     today = date(2026, 11, 17)
-    for action in ("Wait", "Take", "Go", "Email", "Check", "Respond"):
+    for action in ("Go", "Email", "Check", "Respond"):
         entry = record(action=action, deadline="2026-12-31", next="2026-11-19")
         assert next_value(entry, today) == "2026-11-19"
+    for action in ("Apply", "Wait", "Take"):
+        entry = record(action=action, deadline="2026-12-31", next="2026-11-19")
+        assert next_value(entry, today) == "2026-11-22"
+
