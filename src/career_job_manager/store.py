@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 from .documents import current_document_name, import_versioned_document, rename_managed_documents, migrate_brochure
 from .model import ApplicationRecord, sort_records, _parse_deadline_or_none, end_of_current_week, reschedule_overdue_wait_next, reschedule_unexpired_apply_next
 from .importing import parse_import
+from .duplicates import duplicate_reason
 from .naming import application_stem, readable_folder_name
 from .timing import timing_precision, timing_start, timing_end
 from .company import company_union, merge_companies, merge_data, resolve, validate_companies, migrate_company
@@ -204,8 +205,27 @@ class CareerStore:
                 jobs.append(data)
         else:
             jobs = parse_import({k: v for k, v in payload.items() if k != 'companies'})
-        existing = {key: record for record in self._load(preserve_actions=True)
+        existing_records = self._load(preserve_actions=True)
+        existing = {key: record for record in existing_records
                     for key in (record.id, record.import_id) if key}
+        # Check all incoming new vacancies before writing ANY of them. Matching
+        # import IDs are legitimate updates; matching postings with different
+        # IDs require manual reconciliation to protect application history.
+        pending: list[ApplicationRecord] = []
+        for data in jobs:
+            if data['import_id'] in existing:
+                continue
+            candidate = ApplicationRecord.from_dict({'id': '', 'action': 'Check', **data})
+            for other in [*existing_records, *pending]:
+                match = duplicate_reason(candidate, other)
+                if match and match[1]:
+                    raise ValueError(
+                        f"Potential duplicate of {other.company} — {other.job} "
+                        f"(existing ID: {other.import_id or other.id}; "
+                        f"incoming ID: {candidate.import_id}). "
+                        "Use 'job duplicates' and reconcile before reimporting."
+                    )
+            pending.append(candidate)
         created = updated = 0
         for data in jobs:
             old = existing.get(data['import_id'])

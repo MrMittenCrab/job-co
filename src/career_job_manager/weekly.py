@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from .model import (
-    ApplicationRecord, _parse_deadline_or_none, end_of_current_week,
+    ApplicationRecord, WEEKLY_ACTIONS, _parse_deadline_or_none, end_of_current_week,
     next_value, sort_records,
 )
 
@@ -26,7 +26,7 @@ def weekly_agenda(records: list[ApplicationRecord], *, today: date | None = None
             parsed = _parse_deadline_or_none(due)
             if parsed is None or parsed.date() > sunday:
                 continue
-            if parsed.date() < today and not record.next and record.action != "Wait":
+            if parsed.date() < today and not record.next and record.action not in WEEKLY_ACTIONS:
                 # Missed original application deadlines are not proof that
                 # unsubmitted jobs remain actionable. A submitted Wait entry
                 # with an elapsed cutoff *does* warrant a status review.

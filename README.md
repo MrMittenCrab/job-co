@@ -23,6 +23,16 @@ Navigate with **↑/↓**, **→** to open, **/** to search, **t** for Today, **
 
 Run `job export` to write the complete jobs-and-companies snapshot to `~/Downloads/job-export.json` (overwriting the previous export). For a different destination, run `job export PATH.json`. The separate `job export this-week` command continues to produce a weekly action list.
 
+## Weekly action queue and duplicate checks
+
+For `Take`, `Apply`, and `Wait`, the displayed `Next` is the **earlier** of the current week's Sunday and the stored application `Deadline` (including a past deadline). A missing or unrecognized deadline uses Sunday; an approximate month/season uses its last day. `Next` is automatic and read-only for those three Actions, and their ties sort **Take → Apply → Wait**. The original Deadline remains unchanged. Past deadlines therefore remain overdue until you correct the action or deadline.
+
+```bash
+job duplicates
+```
+
+This **read-only** command reports potential duplicate vacancy records (including an alternate company spelling or a matching job-specific application URL). It does not merge or delete records. New JSON imports also reject high-confidence collisions with existing records under a different ID. Review contacts, status, notes, documents, and IDs before consolidating anything.
+
 ## Weekly shortlist
 
 ```bash

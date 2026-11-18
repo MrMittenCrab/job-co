@@ -7,7 +7,7 @@ from career_job_manager.store import CareerStore
 from career_job_manager.ui import ApplicationScreen, CareerApp
 
 
-def test_detail_keeps_auto_next_dynamic_and_saves_manual_next(tmp_path):
+def test_detail_keeps_automatic_next_for_priority_actions(tmp_path):
     async def scenario():
         store = CareerStore(tmp_path / "career")
         store.add(ApplicationRecord(
@@ -38,62 +38,55 @@ def test_detail_keeps_auto_next_dynamic_and_saves_manual_next(tmp_path):
             assert screen.values["Deadline"] == "2026-fall"
             assert screen._auto_next
             screen.finish_inline_edit("Next", "ASAP")
-            assert not screen._auto_next
+            assert screen._auto_next
             screen.action_save()
             await pilot.pause()
             result = store.get("hsbc")
             assert result.action == "Take"
-            assert result.next == "ASAP"
+            assert result.next == ""
             assert result.deadline == "2026-fall"
     asyncio.run(scenario())
 
 
 
-def test_changing_action_preserves_manual_next_and_chronological_position(tmp_path):
-    from career_job_manager.model import next_value
-
-    transitions = [
-        ("Apply", "Take", "2026-11-15"),
-        ("Wait", "Go", "ASAP"),
-        ("Take", "Respond", "2026-11-15"),
-        ("Go", "Email", "2026-11-15 18:30"),
-        ("Email", "Apply", "2026-11-15"),
-        ("Check", "Apply", "2026-11-15"),
-        ("Apply", "Check", "2026-11-15"),
-        ("Wait", "Archive", "2027-11-15"),
-    ]
+def test_changing_action_enforces_weekly_next_but_other_actions_keep_manual_next(tmp_path):
+    from career_job_manager.model import end_of_current_week
 
     async def scenario():
-        store = CareerStore(tmp_path / "career")
-        for i, (before, _, next_due) in enumerate(transitions):
-            store.add(ApplicationRecord(
-                id=f"transition-{i}", company=f"Firm {i}", job="Research",
-                action=before, next=next_due, deadline="",
-            ))
+        store = CareerStore(tmp_path / 'career')
+        store.add(ApplicationRecord(id='priority', company='Firm A', job='Research',
+                                    action='Apply', next='2026-11-15', deadline=''))
+        store.add(ApplicationRecord(id='manual', company='Firm B', job='Research',
+                                    action='Email', next='ASAP', deadline=''))
         app = CareerApp(store)
         async with app.run_test() as pilot:
-            for i, (before, after, next_due) in enumerate(transitions):
-                record_id = f"transition-{i}"
-                await app.push_screen(ApplicationScreen(store, record_id))
-                await pilot.pause()
-                screen = app.screen
-                from career_job_manager.model import end_of_current_week
-                sunday = end_of_current_week(date.today()).isoformat()
-                before_due = sunday if before == "Apply" else next_due
-                after_due = sunday if before == "Apply" or after == "Apply" else next_due
-                assert screen.values["Next"] == before_due
-                assert not screen._auto_next
-                screen._after_choice("Action", after)
-                assert screen.values["Next"] == after_due
-                assert not screen._auto_next
-                screen.action_save()
-                await pilot.pause()
-                result = store.get(record_id)
-                assert result.action == after
-                assert result.next == after_due
-                assert result.deadline == ""
-    asyncio.run(scenario())
+            await app.push_screen(ApplicationScreen(store, 'priority'))
+            await pilot.pause()
+            screen = app.screen
+            sunday = end_of_current_week(date.today()).isoformat()
+            assert screen._auto_next
+            assert screen.values['Next'] == sunday
+            screen._after_choice('Action', 'Take')
+            assert screen._auto_next
+            assert screen.values['Next'] == sunday
+            screen.action_save()
+            await pilot.pause()
+            assert store.get('priority').action == 'Take'
+            assert store.get('priority').next == ''
 
+            await app.push_screen(ApplicationScreen(store, 'manual'))
+            await pilot.pause()
+            screen = app.screen
+            assert not screen._auto_next
+            assert screen.values['Next'] == 'ASAP'
+            screen._after_choice('Action', 'Go')
+            assert not screen._auto_next
+            screen.action_save()
+            await pilot.pause()
+            assert store.get('manual').action == 'Go'
+            assert store.get('manual').next == 'ASAP'
+
+    asyncio.run(scenario())
 
 def test_action_change_keeps_automatic_next_automatic(tmp_path):
     async def scenario():
@@ -112,7 +105,7 @@ def test_action_change_keeps_automatic_next_automatic(tmp_path):
             assert screen.values["Next"] == end_of_current_week(date.today()).isoformat()
             screen._after_choice("Action", "Take")
             assert screen._auto_next
-            assert screen.values["Next"] == "2026-12-31"
+            assert screen.values["Next"] == end_of_current_week(date.today()).isoformat()
             screen.action_save()
             await pilot.pause()
             result = store.get("automatic")

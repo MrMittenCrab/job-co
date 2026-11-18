@@ -7,6 +7,8 @@ from typing import Iterable
 from . import timing
 
 ACTIONS = ("Apply", "Wait", "Take", "Go", "Respond", "Archive", "Email", "Check")
+WEEKLY_ACTIONS = frozenset({"Take", "Apply", "Wait"})
+WEEKLY_ACTION_ORDER = {"Take": 0, "Apply": 1, "Wait": 2}
 
 # Only used when reading records written before Action became editable.
 _LEGACY_STATUS_ACTIONS = {
@@ -304,29 +306,32 @@ def _season_end(today: date) -> date:
     return timing.timing_end(timing.season_for_date(today))
 
 
-def apply_weekly_next(record: ApplicationRecord, today: date) -> str | None:
-    """Apply always needs a current-week follow-up unless a known cutoff passed.
+def weekly_action_next(record: ApplicationRecord, today: date) -> str | None:
+    """Take, Apply and Wait: Sunday, or an earlier original deadline.
 
-    A known, earlier cutoff takes priority over Sunday (including its time).
-    An unknown or missing deadline is not evidence that the cutoff expired.
+    The original Deadline is never rewritten. An elapsed deadline remains
+    overdue, including for Wait; stored Next overrides do not control these
+    three actions. Vague period cutoffs use the period's final calendar day.
     """
-    if record.action != "Apply":
+    if record.action not in WEEKLY_ACTIONS:
         return None
     sunday = end_of_current_week(today)
-    if not record.deadline:
-        return sunday.isoformat()
     exact = _parse_deadline_or_none(record.deadline)
-    if exact:
-        if exact.date() < today:
-            return None
+    if exact is not None:
         return record.deadline if exact.date() <= sunday else sunday.isoformat()
-    try:
-        end = timing.timing_end(record.deadline)
-    except (ValueError, TypeError):
-        return sunday.isoformat()
-    if end < today:
-        return None
-    return min(sunday, end).isoformat()
+    if record.deadline:
+        try:
+            end = timing.timing_end(record.deadline)
+        except (ValueError, TypeError):
+            pass
+        else:
+            return min(sunday, end).isoformat()
+    return sunday.isoformat()
+
+
+def apply_weekly_next(record: ApplicationRecord, today: date) -> str | None:
+    """Compatibility wrapper for callers that deal specifically with Apply."""
+    return weekly_action_next(record, today) if record.action == "Apply" else None
 
 
 def reschedule_unexpired_apply_next(record: ApplicationRecord, today: date) -> bool:
@@ -344,23 +349,17 @@ def reschedule_unexpired_apply_next(record: ApplicationRecord, today: date) -> b
 
 
 def default_next(record: ApplicationRecord, today: date) -> str:
-    """Derive Next without ever mutating the original application Deadline.
+    """Derive the effective Next without changing the application Deadline.
 
-    Apply without a confirmed expired deadline -> this Sunday (or earlier cutoff).
-    Wait with an expired confirmed application deadline -> current-week Sunday.
-    Otherwise, exact deadline -> exact date/time; vague deadline ->
-    the first-week Sunday before its period or after it ends, and the
-    current-week Sunday during the period. With no confirmed deadline,
-    use the recorded recruitment opening ('when') checkpoint.
-    A manually dated overdue Wait Next also rolls to Sunday via next_value().
-    An Apply ASAP is a weekly checkpoint; other actions retain ASAP.
+    Take, Apply and Wait use Sunday or an earlier cutoff, even if that
+    deadline has already passed. Other actions retain legacy timing rules.
     """
     if record.action == "Archive":
         return ""
 
-    apply_due = apply_weekly_next(record, today)
-    if apply_due is not None:
-        return apply_due
+    weekly_due = weekly_action_next(record, today)
+    if weekly_due is not None:
+        return weekly_due
 
     sunday = end_of_current_week(today)
     raw = record.deadline
@@ -410,9 +409,9 @@ def next_value(record: ApplicationRecord, today: date) -> str:
 
     Never write metadata as a side effect of drawing or sorting a row.
     """
-    apply_due = apply_weekly_next(record, today)
-    if apply_due is not None:
-        return apply_due
+    weekly_due = weekly_action_next(record, today)
+    if weekly_due is not None:
+        return weekly_due
     if record.next and record.next.upper() == "ASAP":
         return "ASAP"
     if record.next:
@@ -464,10 +463,9 @@ def undated_application_needing_review(record: ApplicationRecord, today: date) -
 
 def sort_records(records: Iterable[ApplicationRecord], *, today: date | None = None
                  ) -> list[ApplicationRecord]:
-    """Chronological Next (including past), then archived records.
+    """Chronological Next; on identical Next: Take, Apply, Wait, then others.
 
-    ASAP occupies the start of today's date. Earlier past dates always
-    precede today's actions, regardless of Action or manual/auto provenance.
+    Past deadlines remain past; Archive remains at the end.
     """
     today = today or date.today()
 
@@ -480,7 +478,8 @@ def sort_records(records: Iterable[ApplicationRecord], *, today: date | None = N
             moment = datetime.combine(today, time.min)
         else:
             moment = _parse_deadline_or_none(due) or datetime.max
-        return (0, moment, record.action == "Check", *name)
+        priority = WEEKLY_ACTION_ORDER.get(record.action, 3 if record.action != "Check" else 4)
+        return (0, moment, priority, *name)
 
     return sorted(records, key=key)
 
