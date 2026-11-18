@@ -44,7 +44,8 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
     migrator = subparsers.add_parser('migrate', help='Back up and migrate an explicit data directory safely')
     migrator.add_argument('source', type=Path, help='Source directory containing applications.json')
     exporter = subparsers.add_parser('export', help='Export all data or this-week action JSON')
-    exporter.add_argument('file', nargs='+', help='Output filename, or this-week / this week')
+    exporter.add_argument('file', nargs='*',
+                          help='Output filename (default: ~/Downloads/job-export.json), or this-week / this week')
     exporter.add_argument('--output', type=Path, help='Optional destination for this-week export')
     parser.add_argument('-C', '--company', help='company name')
     parser.add_argument('-R', '--role', help='role name')
@@ -77,11 +78,12 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
                 parser.error(str(exc))
             print(f"Exported {len(payload['items'])} tasks through {sunday.isoformat()} to {destination}")
             return
-        if len(args.file) != 1:
+        if len(args.file) > 1:
             parser.error('Use job export PATH.json or job export this-week')
         if args.output:
             parser.error('--output is only available for job export this-week')
-        destination = Path(args.file[0])
+        destination = (Path(args.file[0]) if args.file else
+                       Path.home() / 'Downloads' / 'job-export.json')
         try:
             destination.write_text(
                 json.dumps(CareerStore().export_data(), ensure_ascii=False, indent=2)
