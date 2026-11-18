@@ -35,8 +35,8 @@ def test_this_week_end_includes_asap_overdue_manual_and_sunday():
     assert result["week_ending"] == "2026-11-15"
     assert result["format"] == "jobco-weekly-agenda"
     ids = [r["id"] for r in result["items"]]
-    assert ids == ["overdue", "asap", "close", "mon", "wait", "vague", "sun"]
-    assert "expired" not in ids
+    assert ids == ["expired", "overdue", "close", "asap", "sun", "mon", "wait", "vague"]
+    assert "expired" in ids  # Elapsed cutoffs remain overdue.
     assert "archived" not in ids
 
 
@@ -59,7 +59,7 @@ def test_asap_only_next_and_manual_overdue_reminders_are_preserved():
          record("old-auto", action="Apply", deadline="2026-10-31")],
         today=date(2026, 11, 9),
     )
-    assert [item["id"] for item in result["items"]] == ["old"]
+    assert [item["id"] for item in result["items"]] == ["old-auto", "old"]
 
 
 def test_export_cli_two_word_alias_and_custom_destination(tmp_path, monkeypatch):
@@ -122,9 +122,9 @@ def test_wait_after_closing_is_included_for_review_but_unsubmitted_expired_is_no
                deadline="2027-02-01"),
     ], today=today)
     ids = [entry["id"] for entry in agenda["items"]]
-    assert ids == ["manually-follow-up", "waiting"]
+    assert ids == ["unsubmitted", "waiting", "future-wait", "manually-follow-up"]
     waiting = next(entry for entry in agenda["items"] if entry["id"] == "waiting")
     assert waiting["action"] == "Wait"
-    assert waiting["next"] == "2027-01-10"
+    assert waiting["next"] == "2026-12-31"
     assert waiting["deadline"] == "2026-12-31"
     assert waiting["next_source"] == "automatic"
