@@ -94,6 +94,24 @@ def test_export_cli_hyphen_alias_and_existing_full_export(tmp_path, monkeypatch)
     assert "items" not in snapshot
 
 
+
+def test_export_cli_no_filename_defaults_to_full_snapshot_in_downloads(tmp_path, monkeypatch):
+    store = CareerStore(tmp_path / "career")
+    store.add(record("asap", action="Take", next="ASAP"))
+    monkeypatch.setattr(cli, "CareerStore", lambda: store)
+    monkeypatch.setattr(cli.Path, "home", classmethod(lambda cls: tmp_path))
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+
+    cli.main(["export"])
+
+    destination = downloads / "job-export.json"
+    snapshot = json.loads(destination.read_text(encoding="utf-8"))
+    assert len(snapshot["jobs"]) == 1
+    assert snapshot["jobs"][0]["company"] == "Company asap"
+    assert "companies" in snapshot
+    assert "items" not in snapshot
+
 def test_wait_after_closing_is_included_for_review_but_unsubmitted_expired_is_not():
     today = date(2027, 1, 4)
     agenda = weekly_agenda([
