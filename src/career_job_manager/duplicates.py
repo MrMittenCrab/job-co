@@ -37,6 +37,23 @@ def _role_key(value: str) -> tuple[str, ...]:
                         if word not in _ROLE_LOCATION))
 
 
+def _city_hint(job: str) -> str:
+    """Distinguish explicitly different city-specific vacancies."""
+    value = job.casefold()
+    for city, variants in (
+        ("hong-kong", ("hong kong", " hong-kong", "(hk)", " hk ")),
+        ("singapore", ("singapore", "(sg)", " sg ")),
+        ("london", ("london",)),
+        ("new-york", ("new york", "new-york")),
+        ("shanghai", ("shanghai",)),
+        ("beijing", ("beijing",)),
+        ("shenzhen", ("shenzhen",)),
+    ):
+        if any(variant in f" {value} " for variant in variants):
+            return city
+    return ""
+
+
 def _intake_compatible(a: ApplicationRecord, b: ApplicationRecord) -> bool:
     left = set(re.findall(r"20\d{2}", a.job))
     right = set(re.findall(r"20\d{2}", b.job))
@@ -87,6 +104,9 @@ def duplicate_reason(a: ApplicationRecord, b: ApplicationRecord) -> tuple[str, b
     left_url, right_url = _posting_url(a.portal), _posting_url(b.portal)
     if left_url and left_url == right_url and _specific_posting_url(a.portal):
         return ("identical vacancy application URL", True)
+    city_a, city_b = _city_hint(a.job), _city_hint(b.job)
+    if city_a and city_b and city_a != city_b:
+        return None
     if (_company_key(a.company) and _company_key(a.company) == _company_key(b.company)
             and _role_key(a.job) and _role_key(a.job) == _role_key(b.job)
             and _intake_compatible(a, b)):
