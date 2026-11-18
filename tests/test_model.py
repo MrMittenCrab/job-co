@@ -220,7 +220,7 @@ def test_wait_expired_deadline_reviews_on_current_sunday_without_editing_deadlin
         make_record(id="future-wait", company="D", action="Wait", deadline="2026-12-01"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "old", "next", "wait", "future-wait",
+        "wait", "old", "next", "future-wait",
     ]
     assert records[1].deadline == "2026-09-01"
     assert records[1].next == ""
@@ -238,7 +238,7 @@ def test_wait_approximate_past_timing_is_pinned_after_today():
         make_record(id="future", company="C", when="2026-11", action="Apply"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "old", "wait", "future",
+        "old", "future", "wait",
     ]
     assert records[1].when == "2026-09"
 
@@ -294,8 +294,8 @@ def test_undated_apply_check_appear_after_near_deadlines_and_before_everything_e
         make_record(id="undated-wait", company="Wait", action="Wait", when="2026-11-05"),
     ]
     assert [r.id for r in sort_records(records, today=today)] == [
-        "approx", "far-deadline", "newer-apply", "undated-wait",
-        "newer-check", "older", "urgent", "future-start",
+        "urgent", "approx", "far-deadline", "newer-apply",
+        "undated-wait", "newer-check", "older", "future-start",
         "archived-undated",
     ]
 
@@ -365,7 +365,7 @@ def test_next_supports_asap_but_disallows_approximate_periods():
 
 
 
-def test_active_actions_are_equal_priority_and_check_is_later_on_same_next():
+def test_weekly_actions_are_prioritized_on_same_next():
     from datetime import date
 
     today = date(2026, 11, 10)
@@ -381,6 +381,7 @@ def test_active_actions_are_equal_priority_and_check_is_later_on_same_next():
     result = sort_records(records, today=today)
     ids = [item.id for item in result]
     assert ids[0] == "early-check"  # Chronology is primary, even for Check.
-    assert set(ids[1:7]) == set(active)  # No preferred stage within same Next.
+    assert ids[1:4] == ["Take", "Apply", "Wait"]
+    assert set(ids[4:7]) == {"Go", "Respond", "Email"}
     assert ids[7] == "check"
     assert ids[8] == "archive"
