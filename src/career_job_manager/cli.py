@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
                             default=Path.home() / 'Downloads' / 'jobco-shortlist.json')
     migrator = subparsers.add_parser('migrate', help='Back up and migrate an explicit data directory safely')
     migrator.add_argument('source', type=Path, help='Source directory containing applications.json')
+    subparsers.add_parser('duplicates', help='Report potential duplicate applications (read-only)')
     exporter = subparsers.add_parser('export', help='Export all data or this-week action JSON')
     exporter.add_argument('file', nargs='*',
                           help='Output filename (default: ~/Downloads/job-export.json), or this-week / this week')
@@ -59,6 +60,21 @@ def main(argv: list[str] | None = None, *, initial_root: str = "job") -> None:
         except (ValueError, OSError) as exc:
             parser.error(str(exc))
         print('job&co data migrated; source data and backups retained.')
+        return
+    if args.command == 'duplicates':
+        from .duplicates import find_duplicates
+        matches = find_duplicates(CareerStore().list())
+        if not matches:
+            print('No probable duplicate vacancies found.')
+        else:
+            print(f'Found {len(matches)} possible duplicate pair(s); no records changed.')
+            for index, pair in enumerate(matches, 1):
+                print(f'[{index}] {pair.reason}')
+                for record in (pair.left, pair.right):
+                    print(f'  {record.id} | {record.company} | {record.job} | '
+                          f'Action={record.action} | import_id={record.import_id or "—"}')
+                    print(f'    Portal: {record.portal or "—"}')
+            print('Compare application history and attachments before deleting any record.')
         return
     if args.command == 'export':
         if args.file in (['this-week'], ['this', 'week']):
