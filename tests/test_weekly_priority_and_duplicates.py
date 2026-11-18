@@ -127,6 +127,36 @@ def test_distinct_cities_are_not_automatically_treated_as_duplicate():
     assert find_duplicates([first, second]) == []
 
 
+def test_shared_campus_recruitment_portal_is_not_a_duplicate_vacancy():
+    event = ApplicationRecord(
+        id="pwc-event", company="PwC", job="Campus Event", action="Archive",
+        deadline="2026-09-28",
+        portal="https://app.mokahr.com/m/campus-recruitment/pwc/148260?locale=en-US#/events?page=1",
+    )
+    programme = ApplicationRecord(
+        id="pwc-graduate", company="PwC", job="Graduate Program 2027", action="Archive",
+        deadline="2026-09-28",
+        portal="https://app.mokahr.com/m/campus-recruitment/pwc/148260#/jobs?location=Hongkong",
+    )
+    assert find_duplicates([event, programme]) == []
+
+
+def test_identical_greenhouse_vacancy_with_tracking_query_is_duplicate():
+    original = ApplicationRecord(
+        id="verition-a", company="Verition",
+        job="Investment Internship APAC 2027",
+        portal="https://job-boards.greenhouse.io/veritiongroupllcinternships/jobs/5264435007",
+    )
+    tracked = ApplicationRecord(
+        id="verition-b", company="Verition Fund Management",
+        job="2027 Investment Internship (APAC) — Hong Kong",
+        portal="https://job-boards.greenhouse.io/veritiongroupllcinternships/jobs/5264435007?gh_src=Trackr",
+    )
+    matches = find_duplicates([original, tracked])
+    assert len(matches) == 1
+    assert matches[0].reason == "identical vacancy application URL"
+
+
 def test_read_only_duplicates_command_preserves_records(tmp_path, monkeypatch, capsys):
     store = CareerStore(tmp_path / "data")
     store.add(app("manual", "Wait"))

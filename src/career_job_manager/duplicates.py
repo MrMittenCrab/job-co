@@ -83,8 +83,10 @@ def _specific_posting_url(value: str) -> bool:
     """Generic career homepages must never be treated as vacancy identities."""
     parsed = urlsplit(value.strip())
     path = unquote(parsed.path).casefold()
-    return bool(re.search(r"(?:/jobs?/|/positions?/|/requisitions?/|/job/)", path)
-                or re.search(r"\b\d{5,}\b", path))
+    # A numeric ID in a company-wide careers URL does not identify a
+    # specific vacancy (e.g. MokaHR campus-recruitment/<company>/<portal-id>).
+    # Require a job-/position-specific route instead.
+    return bool(re.search(r"(?:/jobs?/|/positions?/|/requisitions?/)", path))
 
 
 @dataclass(frozen=True)
