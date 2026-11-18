@@ -107,12 +107,12 @@ def test_today_anchor_falls_back_to_last_active_past_entry(tmp_path):
             await pilot.pause()
             widget = app.screen.query_one(ApplicationList)
             assert widget.selected().id == "past-1"
-            assert widget.first_visible == 1
+            assert widget.first_visible == 2
     asyncio.run(scenario())
 
 
 
-def test_expired_wait_appears_in_today_view_not_past(tmp_path):
+def test_expired_wait_stays_overdue_in_chronological_view(tmp_path):
     from datetime import date, timedelta
     from career_job_manager.model import end_of_current_week
 
@@ -137,14 +137,14 @@ def test_expired_wait_appears_in_today_view_not_past(tmp_path):
             await pilot.pause()
             widget = app.screen.query_one(ApplicationList)
             assert [r.id for r in app.screen.visible_records] == [
-                "older", "future", "wait",
+                "wait", "older", "future",
             ]
             assert widget.selected().id == "future"
-            assert widget.first_visible == 1
+            assert widget.first_visible == 2
             assert end_of_current_week(today).strftime("%-d %b") in widget.render().plain
             await pilot.press("t")
             await pilot.pause()
             assert widget.selected().id == "future"
-            assert widget.first_visible == 1
+            assert widget.first_visible == 2
         assert store.export_data() == before
     asyncio.run(scenario())
