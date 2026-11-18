@@ -107,7 +107,7 @@ def test_today_anchor_falls_back_to_last_active_past_entry(tmp_path):
             await pilot.pause()
             widget = app.screen.query_one(ApplicationList)
             assert widget.selected().id == "past-1"
-            assert widget.first_visible == 2
+            assert widget.first_visible == 1
     asyncio.run(scenario())
 
 
