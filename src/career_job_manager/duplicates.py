@@ -83,7 +83,7 @@ def duplicate_reason(a: ApplicationRecord, b: ApplicationRecord) -> tuple[str, b
     if a.id and a.id == b.id:
         return None
     if a.import_id and a.import_id == b.import_id:
-        return None
+        return ("same import ID on separate records", True)
     left_url, right_url = _posting_url(a.portal), _posting_url(b.portal)
     if left_url and left_url == right_url and _specific_posting_url(a.portal):
         return ("identical vacancy application URL", True)
